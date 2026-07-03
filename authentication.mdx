@@ -1,0 +1,143 @@
+---
+title: "Cookie-based authentication in Porfolio & Blog CMS"
+sidebarTitle: "Authentication"
+description: "Porfolio & Blog CMS uses ASP.NET Core cookie authentication with Identity password hashing. Learn how sign-in, sign-out, and session management work."
+---
+
+Porfolio & Blog CMS authenticates users with **ASP.NET Core cookie authentication** (`CookieAuthenticationDefaults.AuthenticationScheme`). Passwords are hashed and verified using the battle-tested `IPasswordHasher<T>` implementation from `Microsoft.Extensions.Identity.Core` — without pulling in the full ASP.NET Core Identity stack. After a successful login, the server issues a signed authentication cookie that the browser automatically attaches to every subsequent request.
+
+## Authentication flow
+
+<Steps>
+  <Step title="Submit credentials">
+    The user submits their email address and password to `POST /api/auth/login`. The request body is deserialized into a `LoginRequest(string Email, string Password, bool RememberMe)` DTO by the `MapLogin` Minimal API endpoint.
+  </Step>
+  <Step title="Fetch user record">
+    The Api layer delegates to `AuthenticateUser.ExecuteAsync(email, password)`. The use case calls `IUserRepository.GetByEmailAsync(email)`, which runs a `SELECT` against the SQLite `Users` table via EF Core. If no matching record is found, `AuthResult.Fail("Credenciales incorrectas.")` is returned immediately and the request ends with `400 Bad Request`.
+  </Step>
+  <Step title="Verify password">
+    `IPasswordHasher.Verify(user.PasswordHash, password)` is called. The concrete `IdentityPasswordHasher` adapter delegates to ASP.NET Core Identity's `IPasswordHasher<User>.VerifyHashedPassword`. If the hash does not match, `AuthResult.Fail("Credenciales incorrectas.")` is returned.
+  </Step>
+  <Step title="Issue authentication cookie">
+    On a successful verification, `ISessionManager.SignInAsync(user)` is called. `CookieSessionManager` builds a `ClaimsPrincipal` containing `ClaimTypes.NameIdentifier` (the user's integer Id) and `ClaimTypes.Email`, then calls `HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal)`. ASP.NET Core serialises, encrypts, and signs the claims into a cookie and appends it to the response.
+  </Step>
+  <Step title="Authenticated session">
+    The browser stores the cookie and attaches it to every subsequent request. ASP.NET Core's authentication middleware decrypts and validates the cookie on each request, populating `HttpContext.User` with the stored claims so that `[Authorize]` attributes and `<AuthorizeView>` components work without any additional round-trips.
+  </Step>
+</Steps>
+
+## Password hashing
+
+`IdentityPasswordHasher` is a thin adapter that satisfies the Application-layer `IPasswordHasher` interface by wrapping the `IPasswordHasher<User>` service registered from `Microsoft.AspNetCore.Identity`. This design keeps the `Application` project free from any Identity package reference — only `Infrastructure` knows about it.
+
+```csharp Infrastructure/Auth/IdentityPasswordHasher.cs
+public string Hash(string rawPassword)
+{
+    return _inner.HashPassword(new User(), rawPassword);
+}
+
+public bool Verify(string hashedPassword, string password)
+{
+    var result = _inner.VerifyHashedPassword(new User(), hashedPassword, password);
+    return result is PasswordVerificationResult.Success;
+}
+```
+
+`IPasswordHasher<User>.HashPassword` uses PBKDF2 with a random salt and a high iteration count by default — the same algorithm used by ASP.NET Core Identity when managing user stores. `Verify` returns `true` only when `VerifyHashedPassword` yields `PasswordVerificationResult.Success`; the `SuccessRehashNeeded` case is intentionally treated as a failure to keep the implementation simple and explicit.
+
+The concrete hasher is registered in `Program.cs` before the adapter:
+
+```csharp Program.cs
+builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+// ...
+builder.Services.AddScoped<IPasswordHasher, IdentityPasswordHasher>();
+```
+
+## Session management
+
+`CookieSessionManager` implements `ISessionManager` and is the only class in the project that directly calls ASP.NET Core's `SignInAsync` / `SignOutAsync` methods. It obtains the current `HttpContext` through the injected `IHttpContextAccessor`.
+
+```csharp Infrastructure/Auth/CookieSessionManager.cs
+public Task SignInAsync(User user)
+{
+    var claims = new []
+    {
+        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+        new Claim(ClaimTypes.Email, user.Email),
+    };
+    var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+    var principal = new ClaimsPrincipal(identity);
+    return _accessor.HttpContext!.SignInAsync(
+        CookieAuthenticationDefaults.AuthenticationScheme, principal);
+}
+```
+
+The sign-out path is equally straightforward — it revokes the cookie by calling `SignOutAsync` with the same scheme:
+
+```csharp Infrastructure/Auth/CookieSessionManager.cs
+public Task SignOutAsync()
+{
+    return _accessor.HttpContext!.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+}
+```
+
+Two claims are embedded in every session:
+
+| Claim | Value | Usage |
+|---|---|---|
+| `ClaimTypes.NameIdentifier` | `user.Id.ToString()` | Uniquely identifies the authenticated user |
+| `ClaimTypes.Email` | `user.Email` | Displayed in the admin UI header |
+
+## Protecting Blazor pages
+
+Admin pages use the standard ASP.NET Core authorization primitives. The `[Authorize]` attribute applied to a Razor component ensures that unauthenticated requests are redirected to the login page before the component renders:
+
+```razor Components/Pages/Admin.razor
+@attribute [Authorize]
+```
+
+Inside components that are accessible to both guests and authenticated users, the `<AuthorizeView>` component selectively renders content based on authentication state:
+
+```razor Components/Shared/NavMenu.razor
+<AuthorizeView>
+    <Authorized>
+        <a href="/admin">Dashboard</a>
+    </Authorized>
+    <NotAuthorized>
+        <a href="/login">Sign in</a>
+    </NotAuthorized>
+</AuthorizeView>
+```
+
+For `<AuthorizeView>` to work in Blazor Server, authentication state must be supplied as a cascading parameter. This is enabled in `Program.cs`:
+
+```csharp Program.cs
+builder.Services.AddCascadingAuthenticationState();
+```
+
+## Cookie configuration
+
+The cookie authentication scheme is configured in `Program.cs` with a single option:
+
+```csharp Program.cs
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(o =>
+    {
+        o.LoginPath = "/login";
+    });
+```
+
+<Note>
+  Any request to a route protected by `[Authorize]` that arrives without a valid authentication cookie is automatically redirected to `/login`. After a successful sign-in the middleware redirects back to the originally requested URL via a `ReturnUrl` query parameter.
+</Note>
+
+The authentication and authorization middleware must be added to the pipeline in the correct order, which `Program.cs` already handles:
+
+```csharp Program.cs
+app.UseAuthentication();
+app.UseAuthorization();
+```
+
+<Warning>
+  Never hardcode passwords, secret keys, or any credentials directly in source code for production deployments. Store sensitive values in environment variables, `dotnet user-secrets` during development, or a secrets management service (Azure Key Vault, AWS Secrets Manager, etc.) in production.
+</Warning>

@@ -1,0 +1,131 @@
+---
+title: "Login page: Blazor Server form with cookie authentication"
+sidebarTitle: "Login Page"
+description: "The /login page is a Blazor Server form that calls AuthenticateUser to validate credentials and issues an authentication cookie on success."
+---
+
+The login page at `/login` is a Blazor Server component that renders a credential form, validates input with Data Annotations, delegates authentication to the `AuthenticateUser` use case, and navigates to `/admin` on success. The entire flow — validation, use-case call, navigation or error display — runs inside a single `HandleLogin` method wired to the form's `OnValidSubmit` event.
+
+## Form model
+
+The component defines a nested `LoginModel` class that carries the form fields and their validation rules:
+
+```csharp Login.razor (@code)
+public class LoginModel
+{
+    [Required, EmailAddress]
+    public string Email { get; set; } = string.Empty;
+
+    [Required]
+    public string Password { get; set; } = string.Empty;
+}
+```
+
+`[Required]` ensures neither field can be submitted empty. `[EmailAddress]` enforces a valid email format on the `Email` field (for example, `user@example.com`). Both attributes are standard `System.ComponentModel.DataAnnotations` decorators and are evaluated automatically by the `<DataAnnotationsValidator>` component inside the form — the form will not call `HandleLogin` until all validations pass.
+
+The model instance is bound to the form via `[SupplyParameterFromForm]`, which tells Blazor to populate the model from the HTTP form data on a static SSR POST:
+
+```csharp Login.razor (@code)
+[SupplyParameterFromForm]
+private LoginModel model { get; set; } = new LoginModel();
+private string error = string.Empty;
+```
+
+## Authentication logic
+
+When the form passes validation, Blazor invokes `HandleLogin`:
+
+```csharp Login.razor (@code)
+private async Task HandleLogin()
+{
+    error = string.Empty;
+
+    AuthResult? result = await AuthenticateUserUseCase.ExecuteAsync(model.Email, model.Password);
+
+    if (result.Success)
+    {
+        NavigationManager.NavigateTo("/admin");
+    }
+    else
+    {
+        error = "Usuario o contraseña inválidos";
+    }
+}
+```
+
+The flow proceeds in three steps:
+
+<Steps>
+  <Step title="Clear previous errors">
+    `error` is reset to an empty string so stale error messages from a previous attempt are not shown.
+  </Step>
+  <Step title="Call AuthenticateUser">
+    `AuthenticateUserUseCase.ExecuteAsync(email, password)` looks up the user by email, verifies the password hash using `IPasswordHasher`, and — if credentials are valid — calls `ISessionManager.SignInAsync()` to write an authentication cookie to the response. It returns an `AuthResult` DTO with a `Success` boolean.
+  </Step>
+  <Step title="Navigate or display error">
+    If `result.Success` is `true`, `NavigationManager.NavigateTo("/admin")` performs a client-side navigation to the admin dashboard. If `false`, the `error` string is set to `"Usuario o contraseña inválidos"` and re-rendered below the form.
+  </Step>
+</Steps>
+
+## Form rendering
+
+The Razor markup renders the form using Blazor's `<EditForm>` component:
+
+```razor Login.razor
+<EditForm Model="model" OnValidSubmit="HandleLogin" FormName="login">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+    <div class="form-group">
+        <label>Email</label>
+        <InputText class="form-control" @bind-Value="model.Email" placeholder="Email" />
+    </div>
+    <div class="form-group">
+        <label>Password</label>
+        <InputText class="form-control" type="password" @bind-Value="model.Password" />
+    </div>
+    <button>Entrar</button>
+</EditForm>
+```
+
+Key elements:
+
+| Element | Purpose |
+|---|---|
+| `<EditForm Model="model">` | Binds the form to the `LoginModel` instance and manages its `EditContext` |
+| `OnValidSubmit="HandleLogin"` | Fires `HandleLogin` only when all validation rules pass |
+| `FormName="login"` | Gives the form a stable name for Blazor's static SSR form handling |
+| `<DataAnnotationsValidator />` | Wires the `EditContext` to Data Annotations so `[Required]` and `[EmailAddress]` are enforced |
+| `<ValidationSummary />` | Renders a consolidated list of all validation messages above the fields |
+| `@bind-Value="model.Email"` | Two-way binds the `<InputText>` to the `Email` property |
+| `type="password"` on the password `<InputText>` | Masks the input in the browser |
+
+Error messages from a failed login attempt are displayed below the form:
+
+```razor Login.razor (error display)
+@if (!string.IsNullOrEmpty(error))
+{
+    <p>@error</p>
+}
+```
+
+## Injected dependencies
+
+`Login.razor` declares two `@inject` directives at the top of the file:
+
+```razor Login.razor
+@inject NavigationManager NavigationManager
+@inject AuthenticateUser AuthenticateUserUseCase
+```
+
+Both services are registered in `Program.cs`:
+
+- **`AuthenticateUser`** — registered as `AddScoped<AuthenticateUser>()`. It encapsulates the credential validation and session creation logic, keeping the page component free of infrastructure concerns.
+- **`NavigationManager`** — a built-in Blazor service, always available without explicit registration, used to trigger the post-login redirect.
+
+<Note>
+  This page uses Blazor's built-in form handling (`EditForm`, `OnValidSubmit`). The `HandleLogin` method is only invoked when all Data Annotations validations pass — if `Email` is blank or malformed, or `Password` is empty, Blazor blocks submission and displays the validation messages via `<ValidationSummary />` without ever calling `HandleLogin`.
+</Note>
+
+<Tip>
+  To add a **Remember Me** feature, add a `RememberMe` boolean property to `LoginModel` and bind it to a checkbox in the form. Then pass it through to `AuthenticateUser.ExecuteAsync`. The `LoginRequest` DTO already includes a `RememberMe` parameter, so the use case and session manager are already wired to honour it — the cookie persistence duration is controlled inside `CookieSessionManager.SignInAsync()`.
+</Tip>

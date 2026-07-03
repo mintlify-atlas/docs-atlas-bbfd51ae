@@ -1,0 +1,150 @@
+---
+title: "Blazor Server UI structure and layout components"
+sidebarTitle: "UI Overview"
+description: "Understand how Porfolio & Blog CMS organises its Blazor Server UI, from the root App.razor shell to MainLayout and the NavMenu sidebar."
+---
+
+The UI layer is a standard Blazor Server application hosted inside an ASP.NET Core 10 host. It uses `App.razor` as the root HTML shell, `Routes.razor` to wire up Blazor's router, and `MainLayout.razor` to provide the shared page chrome — sidebar, top bar, and content area — that wraps every page.
+
+## Application shell (App.razor)
+
+`App.razor` is the outermost HTML document. It is the single file that owns the `<html>`, `<head>`, and `<body>` tags for the entire application. The head section loads all global assets:
+
+- **Bootstrap CSS** — loaded via the `Assets` fingerprinting API (`lib/bootstrap/dist/css/bootstrap.min.css`)
+- **app.css** — application-level custom styles
+- **porfolio-blog.styles.css** — Blazor's scoped CSS bundle, generated at build time by aggregating all `*.razor.css` files
+- **favicon.png** — site icon
+- **`<HeadOutlet />`** — a Blazor component that lets individual pages inject `<title>` and other `<head>` content via `<PageTitle>` and `<HeadContent>`
+
+Inside `<body>`, the shell renders `<Routes />` (the router), `<ReconnectModal />` (the SignalR reconnect overlay), and the `blazor.web.js` framework script.
+
+```razor App.razor
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["porfolio-blog.styles.css"]" />
+    <ImportMap />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+</body>
+</html>
+```
+
+## Router configuration (Routes.razor)
+
+`Routes.razor` hosts the Blazor `<Router>` component and is the single place where routing behaviour is defined. It points the router at the application assembly so it can discover all `@page`-annotated components, and it declares `NotFoundPage` so unmatched URLs render the `Pages.NotFound` component.
+
+```razor Routes.razor
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>
+```
+
+All matched pages use `MainLayout` as their default layout. A page can override this by declaring `@layout SomeOtherLayout` at the top of the `.razor` file. The `<FocusOnNavigate>` component moves keyboard focus to the first `<h1>` on each navigation, which improves screen-reader accessibility.
+
+## Main layout (MainLayout.razor)
+
+`MainLayout` inherits from `LayoutComponentBase` and defines the two-column page structure used by every page. The left column renders the `<NavMenu />` sidebar; the right column renders the page body via `@Body`.
+
+```razor MainLayout.razor
+@inherits LayoutComponentBase
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+```
+
+The `#blazor-error-ui` div is a Blazor convention — the framework unhides it automatically whenever an unhandled exception propagates to the circuit level, giving users a visible reload prompt.
+
+## Navigation menu (NavMenu.razor)
+
+`NavMenu.razor` renders the collapsible sidebar navigation. It uses Blazor's `<NavLink>` component, which automatically applies the `active` CSS class when its `href` matches the current URL.
+
+The current navigation links are:
+
+| Route | Label | Match mode |
+|---|---|---|
+| `/` | Home | `NavLinkMatch.All` (exact match only) |
+| `/counter` | Counter | Prefix match |
+| `/weather` | Weather | Prefix match |
+
+`NavLinkMatch.All` is used for the root `/` link to prevent it from lighting up as active on every page.
+
+<Note>
+  To expose the portfolio and blog sections in the sidebar, add new `<NavLink>` entries inside `NavMenu.razor`. For example, add `<NavLink href="admin">Admin</NavLink>` to give authenticated users a direct link to the admin dashboard, or add portfolio and blog links as the corresponding pages are built out.
+</Note>
+
+## Reconnect modal (ReconnectModal.razor)
+
+Blazor Server uses a persistent SignalR WebSocket connection between the browser and the server. If that connection drops — due to a network hiccup, server restart, or idle timeout — Blazor surfaces a reconnect UI to the user rather than silently failing.
+
+`ReconnectModal.razor` provides this UI. It renders a `<dialog>` element with several state-specific messages:
+
+- **Rejoining** — shown immediately when the connection is lost, while Blazor attempts to reconnect
+- **Rejoin failed / retrying** — shown after a failed attempt, with a countdown to the next retry
+- **Failed permanently** — shown when all retries are exhausted, with a manual **Retry** button
+- **Session paused / resume failed** — shown when the server has paused the circuit
+
+The reconnect logic itself (timers, retry counting, DOM class toggling) lives in the companion JavaScript module `ReconnectModal.razor.js`, loaded as an ES module via `@Assets["Components/Layout/ReconnectModal.razor.js"]`.
+
+## Available pages
+
+| Route | Page file | Auth required | Description |
+|---|---|---|---|
+| `/` | `Home.razor` | No | Landing page |
+| `/login` | `Login/Login.razor` | No | Login form with cookie authentication |
+| `/admin` | `Admin/Admin.razor` | Yes (`[Authorize]`) | Admin dashboard |
+| `/counter` | `Counter.razor` | No | Sample interactive counter component |
+| `/weather` | `Weather.razor` | No | Sample weather data table |
+| *(any other)* | `NotFound.razor` | No | 404 not-found fallback page |
+
+## Render modes
+
+Blazor 8+ (and ASP.NET Core 10) supports multiple render modes per component. The Porfolio & Blog CMS uses two modes:
+
+**Static SSR (default)** — Pages render on the server and return plain HTML. There is no persistent SignalR connection and no client-side interactivity. This is the default for all pages that do not declare a `@rendermode` directive, including `Home.razor`, `Login.razor`, `Counter.razor`, and `Weather.razor`.
+
+**`@rendermode InteractiveServer`** — The component renders server-side *and* establishes a live SignalR circuit so UI events (button clicks, form changes) are handled on the server in real time. `Admin.razor` uses this mode because it needs to reactively display authentication state via `<AuthorizeView>` and handle the `ClaimsPrincipal` from the cascading `AuthenticationState`.
+
+```razor Admin.razor (render mode declaration)
+@page "/admin"
+@rendermode InteractiveServer
+@attribute [Authorize]
+```
+
+Use `@rendermode InteractiveServer` when a page or component requires:
+- Real-time UI updates driven by server state
+- Two-way data binding with immediate server feedback
+- Access to cascading parameters such as `AuthenticationState` that are only available on an active circuit

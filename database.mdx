@@ -1,0 +1,113 @@
+---
+title: "SQLite database and EF Core migrations"
+sidebarTitle: "Database"
+description: "Porfolio & Blog CMS uses Entity Framework Core 10 with SQLite. Learn about the database schema, running migrations, and the AppDbContext configuration."
+---
+
+Porfolio & Blog CMS persists data with **Entity Framework Core 10** backed by a **SQLite** database. SQLite requires no server process and no installation — the entire database is a single file (`blog.db`) created automatically in the project root when migrations are applied. The connection string is read from `appsettings.json` and injected into `AppDbContext` at startup via the standard `IConfiguration` pipeline.
+
+## Schema
+
+The initial migration (`20260702123917_InitialCrate`) creates one table: **`Users`**.
+
+| Column | Type | Constraints |
+|---|---|---|
+| `Id` | `INTEGER` | Primary key, `AUTOINCREMENT` |
+| `Email` | `TEXT` | `NOT NULL`, unique index `IX_Users_Email` |
+| `PasswordHash` | `TEXT` | `NOT NULL` |
+
+The unique index on `Email` is enforced at both the database level (via the migration) and the EF Core model level (via `HasIndex(...).IsUnique()`), preventing duplicate accounts even under concurrent insert scenarios.
+
+The `Id` column uses SQLite's `AUTOINCREMENT` keyword, meaning deleted Ids are never reused — a deliberate choice to avoid referential ambiguity if foreign keys are added in future migrations.
+
+## AppDbContext
+
+`AppDbContext` is the single EF Core context for the entire application. It exposes the `Users` set and configures the unique email index in `OnModelCreating`:
+
+```csharp Infrastructure/Persistence/Context/AppDbContext.cs
+public class AppDbContext : DbContext
+{
+    public DbSet<User> Users => Set<User>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<User>().HasIndex(u => u.Email).IsUnique();
+    }
+}
+```
+
+The context is registered as a scoped service in `Program.cs`, pointing at the SQLite connection string:
+
+```csharp Program.cs
+builder.Services.AddDbContext<AppDbContext>(opts =>
+    opts.UseSqlite(builder.Configuration.GetConnectionString("Default")));
+```
+
+`UserRepository` receives `AppDbContext` through constructor injection and is the only class allowed to query it directly, keeping all database access behind the `IUserRepository` port:
+
+```csharp Infrastructure/Persistence/Repositories/UserRepository.cs
+public Task<User?> GetByEmailAsync(string email)
+{
+    return _db.Users.FirstOrDefaultAsync(x => x.Email == email);
+}
+
+public async Task AddAsync(User user)
+{
+    await _db.Users.AddAsync(user);
+    await _db.SaveChangesAsync();
+}
+```
+
+## Connection string
+
+The database location is configured in `appsettings.json`:
+
+```json appsettings.json
+{
+  "ConnectionStrings": {
+    "Default": "Data Source=blog.db"
+  }
+}
+```
+
+`Data Source=blog.db` is a relative path, so `blog.db` is created in the current working directory when the application runs — typically the project root during development and the publish output folder in production. To use an absolute path or a different location, update the value to e.g. `Data Source=/var/data/blog.db`.
+
+## Running migrations
+
+<Steps>
+  <Step title="Restore the dotnet-ef tool">
+    The `dotnet-ef` CLI tool is pinned in `.config/dotnet-tools.json`. Restore it after cloning the repository:
+
+    ```bash
+    dotnet tool restore
+    ```
+  </Step>
+  <Step title="Apply all pending migrations">
+    Run the following command from the project root to bring the database schema up to date:
+
+    ```bash
+    dotnet ef database update
+    ```
+
+    EF Core reads the connection string from `appsettings.json`, connects to (or creates) `blog.db`, and applies every migration that has not yet been recorded in the `__EFMigrationsHistory` table.
+  </Step>
+  <Step title="Verify the database file">
+    After the command completes, `blog.db` is present in the project root. You can inspect it with any SQLite client (e.g., the VS Code SQLite Viewer extension, `sqlite3` CLI, or DB Browser for SQLite) to confirm the `Users` table and `IX_Users_Email` index were created correctly.
+  </Step>
+</Steps>
+
+## Creating new migrations
+
+When you add or modify a property on a Domain entity, generate a new migration to record the schema change:
+
+```bash
+dotnet ef migrations add <MigrationName>
+dotnet ef database update
+```
+
+Replace `<MigrationName>` with a descriptive PascalCase name such as `AddPostsTable` or `AddUserDisplayName`. EF Core compares the current model snapshot against the last known state and generates the appropriate `Up` / `Down` methods automatically. Always review the generated migration file before applying it to a shared or production database.
+
+<Tip>
+  The `.config/dotnet-tools.json` manifest pins `dotnet-ef` to version **10.0.9** — the same major version as the EF Core runtime packages. Running `dotnet tool restore` after cloning guarantees you use this exact version, preventing the version-mismatch errors that occur when the global `dotnet-ef` tool differs from the project's runtime.
+</Tip>

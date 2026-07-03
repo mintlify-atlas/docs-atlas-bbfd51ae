@@ -1,0 +1,171 @@
+---
+title: "Seed the admin user for local development"
+sidebarTitle: "Seeding"
+description: "AdminUserSeeder automatically creates the first admin user on app startup in the Development environment using credentials from appsettings.Development.json."
+---
+
+On every startup in the **Development** environment, `AdminUserSeeder.SeedAsync()` checks whether the configured admin email already exists in the database and creates the user if it doesn't. This means you never need to manually run SQL scripts, open a database browser, or call a registration endpoint just to get a working admin account — cloning the repository and running `dotnet run` is enough to have a fully authenticated local environment within seconds.
+
+## How seeding works
+
+<Steps>
+  <Step title="Seeder is invoked at application startup">
+    `Program.cs` creates a DI scope immediately after the application is built and resolves `AdminUserSeeder` from the service container. `SeedAsync()` is called and awaited before the HTTP pipeline begins accepting requests, guaranteeing the admin account is available from the very first page load.
+
+    ```csharp Program.cs
+    using (var scope = app.Services.CreateScope())
+    {
+        var seeder = scope.ServiceProvider.GetRequiredService<AdminUserSeeder>();
+        await seeder.SeedAsync();
+    }
+    ```
+  </Step>
+
+  <Step title="Environment guard — exits immediately outside Development">
+    The very first thing `SeedAsync()` does is check the current hosting environment. If the application is not running under `Development`, the method returns without touching the database. This makes the seeder a true no-op in staging and production environments.
+
+    ```csharp AdminUserSeeder.cs
+    if (!_environment.IsDevelopment())
+    {
+        return;
+    }
+    ```
+  </Step>
+
+  <Step title="Reads seed credentials from configuration">
+    The seeder reads `Seed:AdminEmail` and `Seed:AdminPassword` from the `IConfiguration` abstraction. In practice these values come from `appsettings.Development.json`. If either value is missing or whitespace-only, the seeder logs nothing and exits — preventing a silent failure from creating an account with empty credentials.
+
+    ```csharp AdminUserSeeder.cs
+    var email = _configuration["Seed:AdminEmail"];
+    var password = _configuration["Seed:AdminPassword"];
+
+    if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+    {
+        return;
+    }
+    ```
+  </Step>
+
+  <Step title="Checks whether the admin user already exists">
+    `IUserRepository.GetByEmailAsync(email)` queries the database for a user matching the configured email address. If a record is found, the seeder prints a message to the console and returns without modifying anything. This makes every startup **idempotent** — running the application ten times creates exactly one admin user.
+
+    ```csharp AdminUserSeeder.cs
+    var existing = await _userRepository.GetByEmailAsync(email);
+    if (existing is not null)
+    {
+        Console.WriteLine($"[Seed] Admin '{email}' ya existe.");
+        return;
+    }
+    ```
+  </Step>
+
+  <Step title="Creates and persists the admin user">
+    When no existing user is found, `User.Create(email, password, _passwordHasher)` constructs a new `User` domain entity. The `IPasswordHasher` implementation (backed by ASP.NET Core Identity's `PasswordHasher<User>`) hashes the plain-text password before it is stored. The new user is then persisted via `IUserRepository.AddAsync(user)`.
+
+    ```csharp AdminUserSeeder.cs
+    var user = Domain.Entities.User.Create(email, password, _passwordHasher);
+    await _userRepository.AddAsync(user);
+    Console.WriteLine($"[Seed] Admin '{email}' creado.");
+    ```
+  </Step>
+</Steps>
+
+## Default seed credentials
+
+The out-of-the-box credentials shipped in `appsettings.Development.json` are:
+
+```json appsettings.Development.json
+{
+  "Seed": {
+    "AdminEmail": "admin@andresblog.com",
+    "AdminPassword": "Admin123!"
+  }
+}
+```
+
+Use these to sign in at `http://localhost:5058/login` after your first `dotnet run`.
+
+<Warning>
+  **Change these credentials before pushing to a shared repository or deploying anywhere.** Even though the seeder only runs in Development, storing default passwords in version control is a security risk. Override them using environment variables (see below) or replace the values in `appsettings.Development.json` and add that file to `.gitignore`.
+</Warning>
+
+## AdminUserSeeder source
+
+The complete seeder implementation for reference:
+
+```csharp AdminUserSeeder.cs
+public async Task SeedAsync()
+{
+    if (!_environment.IsDevelopment())
+    {
+        return;
+    }
+
+    Console.WriteLine("[Seed] Admin User iniciado...");
+
+    var email = _configuration["Seed:AdminEmail"];
+    var password = _configuration["Seed:AdminPassword"];
+
+    if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+    {
+        return;
+    }
+
+    var existing = await _userRepository.GetByEmailAsync(email);
+    if (existing is not null)
+    {
+        Console.WriteLine($"[Seed] Admin '{email}' ya existe.");
+        return;
+    }
+
+    var user = Domain.Entities.User.Create(email, password, _passwordHasher);
+    await _userRepository.AddAsync(user);
+    Console.WriteLine($"[Seed] Admin '{email}' creado.");
+}
+```
+
+The constructor receives four dependencies injected by the DI container: `IUserRepository` for database access, `IPasswordHasher` for hashing the plain-text password, `IConfiguration` for reading the credentials, and `IWebHostEnvironment` for the environment guard.
+
+## Customising seed credentials
+
+You can override the seed credentials at runtime using environment variables — no file modifications needed. ASP.NET Core's configuration system automatically picks up environment variables that match the config key hierarchy.
+
+```bash
+# Linux / macOS
+export Seed__AdminEmail="me@example.com"
+export Seed__AdminPassword="MyStrongPass1!"
+dotnet run
+```
+
+```powershell
+# Windows PowerShell
+$env:Seed__AdminEmail = "me@example.com"
+$env:Seed__AdminPassword = "MyStrongPass1!"
+dotnet run
+```
+
+<Tip>
+  ASP.NET Core maps **double underscores** (`__`) in environment variable names to nested configuration keys. So `Seed__AdminEmail` maps to the JSON path `Seed:AdminEmail`. This is the standard cross-platform convention — a single underscore would not work.
+</Tip>
+
+Environment variable overrides take precedence over both `appsettings.json` and `appsettings.Development.json`, so you can keep the default file untouched and supply real credentials at runtime in CI or shared dev environments.
+
+## Registration in Program.cs
+
+`AdminUserSeeder` is registered as a **transient** service so the DI container always creates a fresh instance — appropriate for a one-shot startup task. The seeder is then resolved from a manually created scope and invoked before the HTTP middleware pipeline is started:
+
+```csharp Program.cs
+builder.Services.AddTransient<AdminUserSeeder>();
+// ...
+using (var scope = app.Services.CreateScope())
+{
+    var seeder = scope.ServiceProvider.GetRequiredService<AdminUserSeeder>();
+    await seeder.SeedAsync();
+}
+```
+
+The `using` block ensures the scope — and all scoped services it holds, such as `AppDbContext` — are disposed cleanly after seeding completes, regardless of whether `SeedAsync()` succeeds or throws.
+
+<Info>
+  The seeder runs **before** `app.UseAuthentication()` and `app.UseAuthorization()` are called, so there is no risk of the middleware pipeline interfering with database writes during the seed operation.
+</Info>

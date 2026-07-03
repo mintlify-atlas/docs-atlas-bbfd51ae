@@ -1,0 +1,101 @@
+{
+  "projectType": "saas",
+  "projectName": "Porfolio & Blog CMS",
+  "projectDescription": "A personal portfolio and blog CMS built with ASP.NET Core and Blazor Server, featuring cookie-based authentication, a clean architecture pattern (domain/application/infrastructure layers), and a SQLite-backed admin panel.",
+  "theme": "willow",
+  "primaryColor": "#1b6ec2",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "project-structure"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "architecture",
+              "authentication",
+              "database"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration",
+              "seeding"
+            ]
+          },
+          {
+            "group": "UI & Pages",
+            "pages": [
+              "ui-overview",
+              "admin-panel",
+              "login-page"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Auth Endpoints",
+            "pages": [
+              "api/login",
+              "api/logout"
+            ]
+          },
+          {
+            "group": "Application Layer",
+            "pages": [
+              "api/use-cases",
+              "api/interfaces"
+            ]
+          },
+          {
+            "group": "Domain & Infrastructure",
+            "pages": [
+              "api/entities",
+              "api/repositories",
+              "api/session-manager"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Blazor Server interactive UI with SSR and interactive server render mode",
+    "Cookie-based authentication using ASP.NET Core Identity password hashing",
+    "Clean Architecture (Domain / Application / Infrastructure / UI / Api layers)",
+    "Minimal API endpoints for auth (POST /api/auth/login, POST /api/auth/logout)",
+    "Entity Framework Core with SQLite persistence",
+    "Auto-seeded admin user in development via AdminUserSeeder",
+    "Protected /admin panel with cascading authentication state",
+    "Database migrations managed with dotnet-ef"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/login",
+    "POST /api/auth/logout",
+    "AuthenticateUser.ExecuteAsync(email, password)",
+    "RegisterUser.ExecuteAsync(email, rawPassword)",
+    "LogoutUser.ExecuteAsync()",
+    "IUserRepository.GetByEmailAsync(email)",
+    "IUserRepository.AddAsync(user)",
+    "IPasswordHasher.Hash(rawPassword)",
+    "IPasswordHasher.Verify(hashedPassword, password)",
+    "ISessionManager.SignInAsync(user)",
+    "ISessionManager.SignOutAsync()",
+    "User.Create(email, rawPassword, hasher)",
+    "AdminUserSeeder.SeedAsync()"
+  ]
+}

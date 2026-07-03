@@ -1,0 +1,77 @@
+---
+title: "User entity: domain model and factory method"
+sidebarTitle: "User Entity"
+description: "Reference for the User domain entity in Porfolio & Blog CMS, including its properties, the User.Create factory method, and how it interacts with IPasswordHasher."
+---
+
+`User` is the only domain entity in the application. It lives in the `Domain` layer with no framework dependencies. Password hashing is delegated to `IPasswordHasher` via the factory method, keeping the entity clean.
+
+## Properties
+
+<ResponseField name="Id" type="int">
+  Auto-increment primary key. This value is `0` until the entity is persisted — EF Core sets it after `SaveChangesAsync()` completes.
+</ResponseField>
+
+<ResponseField name="Email" type="string">
+  The user's email address. Initialized to `string.Empty` by default. A unique index is enforced at the database level by `AppDbContext.OnModelCreating`.
+</ResponseField>
+
+<ResponseField name="PasswordHash" type="string">
+  Stores the hashed representation of the user's password. Declared with `private set`, meaning it cannot be assigned from outside the `User` class. The only way to populate this property is through the `User.Create` factory method.
+</ResponseField>
+
+## Factory method: User.Create
+
+The static factory `User.Create` is the single entry point for constructing a valid `User` instance. It accepts a plain-text password, delegates hashing to the provided `IPasswordHasher`, and returns a fully initialised entity ready to be persisted.
+
+**Signature**
+
+```csharp
+static User Create(string email, string rawPassword, IPasswordHasher hasher)
+```
+
+**Parameters**
+
+<ParamField path="email" type="string" required>
+  The user's email address. Stored directly on the entity — no normalisation or validation is applied at the domain layer.
+</ParamField>
+
+<ParamField path="rawPassword" type="string" required>
+  The plain-text password supplied by the caller. It is hashed immediately inside `Create` and is never stored on the entity.
+</ParamField>
+
+<ParamField path="hasher" type="IPasswordHasher" required>
+  The hasher abstraction used to compute `PasswordHash`. In production this is satisfied by `IdentityPasswordHasher`, but any implementation of `IPasswordHasher` may be substituted (e.g., a test double).
+</ParamField>
+
+**Full source**
+
+```csharp Domain/Entities/User.cs
+public class User
+{
+    public int Id { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string PasswordHash { get; private set; } = string.Empty;
+
+    public static User Create(string email, string rawPassword, IPasswordHasher hasher)
+    {
+        return new User() { Email = email, PasswordHash = hasher.Hash(rawPassword) };
+    }
+}
+```
+
+<Note>
+  `PasswordHash` has a `private set` accessor, meaning it can only be assigned inside the `User` class — enforcing that all hashing goes through `User.Create`. There is no public setter and no other constructor parameter for the hash, making it impossible to accidentally store a plain-text password on the entity.
+</Note>
+
+## EF Core mapping
+
+`AppDbContext` maps `User` to a `Users` table through EF Core's convention-based mapping. There are no explicit `[Table]`, `[Column]`, or `[Key]` attributes on the entity — EF Core infers the table name from the `DbSet<User> Users` property name and treats `Id` as the primary key by convention.
+
+The one non-default configuration applied in `OnModelCreating` is a unique index on the `Email` column:
+
+```csharp Infrastructure/Persistence/Context/AppDbContext.cs
+modelBuilder.Entity<User>().HasIndex(u => u.Email).IsUnique();
+```
+
+This means attempting to persist two `User` records with the same email address will throw a `DbUpdateException` at the database level, regardless of any application-layer validation.

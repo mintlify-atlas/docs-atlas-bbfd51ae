@@ -1,0 +1,116 @@
+---
+title: "Clean Architecture layers in Porfolio & Blog CMS"
+sidebarTitle: "Architecture"
+description: "Learn how Porfolio & Blog CMS implements Clean Architecture across five layers: Domain, Application, Infrastructure, Api, and UI."
+---
+
+Porfolio & Blog CMS is structured around **Clean Architecture** — a layering strategy that keeps business logic completely independent of frameworks, databases, and delivery mechanisms. The Domain and Application layers contain every rule and use case that matters to the product; they have zero knowledge of ASP.NET Core, Entity Framework, or Blazor. Infrastructure, Api, and UI are outer rings that implement interfaces defined in the inner layers, which means the entire technology stack can be swapped without touching a single business rule.
+
+## The Dependency Rule
+
+Clean Architecture has one inviolable constraint: **source-code dependencies can only point inward**. Outer layers may depend on inner layers; inner layers must never import anything from an outer layer. Domain knows nothing about Application, Application knows nothing about Infrastructure, and neither knows anything about the web framework or the UI renderer.
+
+<Note>
+  If you find yourself importing an `Infrastructure` or `Api` namespace inside `Domain` or `Application`, that is a Clean Architecture violation. Use an interface (port) in the inner layer and inject the concrete implementation from outside.
+</Note>
+
+## Layer overview
+
+### Domain
+
+The Domain layer is the innermost ring and carries no framework dependencies whatsoever — not even a NuGet reference to ASP.NET Core. Its sole aggregate is the `User` entity, which protects its own invariants through a static factory method:
+
+```csharp Domain/Entities/User.cs
+public class User
+{
+    public int Id { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string PasswordHash { get; private set; } = string.Empty;
+
+    // Factory — hashing is injected so the entity never touches infrastructure
+    public static User Create(string email, string rawPassword, IPasswordHasher hasher)
+    {
+        return new User() { Email = email, PasswordHash = hasher.Hash(rawPassword) };
+    }
+}
+```
+
+`PasswordHash` has a `private set`, ensuring the hash can only be assigned at construction time through the factory. The `IPasswordHasher` dependency is defined in Application and passed in, so Domain itself remains free of any concrete hashing library.
+
+### Application
+
+The Application layer orchestrates business workflows. It defines:
+
+- **Use cases** — `AuthenticateUser`, `RegisterUser`, and `LogoutUser`. Each exposes a single `ExecuteAsync` method and returns a typed result record.
+- **Port interfaces** — `IUserRepository`, `IPasswordHasher`, and `ISessionManager`. These are the contracts that Infrastructure must satisfy; Application never imports the concrete classes.
+- **DTOs** — `LoginRequest` (email, password, rememberMe flag), `AuthResult` (success flag + optional error message), and `RegisterResult` (success flag, new user Id, optional error message).
+
+```csharp Application/DTOs/AuthResult.cs
+public record AuthResult(bool Success, string? Error = null)
+{
+    public static AuthResult Ok() => new(true);
+    public static AuthResult Fail(string error) => new(false, error);
+}
+```
+
+```csharp Application/DTOs/RegisterResult.cs
+public record RegisterResult(bool Success, int? NewId = null, string? Error = null)
+{
+    public static RegisterResult Ok(int newId) => new(true, newId);
+    public static RegisterResult Fail(string error) => new(false, Error: error);
+}
+```
+
+### Infrastructure
+
+Infrastructure is the outermost implementation layer. It provides concrete adapters for every port defined in Application:
+
+- **`UserRepository`** — implements `IUserRepository` using Entity Framework Core with a SQLite database. Queries the `AppDbContext.Users` `DbSet<User>` and calls `SaveChangesAsync()` on writes.
+- **`IdentityPasswordHasher`** — implements `IPasswordHasher` by wrapping `IPasswordHasher<User>` from `Microsoft.Extensions.Identity.Core`. This keeps the Application layer free from any Identity package references.
+- **`CookieSessionManager`** — implements `ISessionManager` using `IHttpContextAccessor`. It builds a `ClaimsPrincipal` from the authenticated user's Id and email, then calls ASP.NET Core's `HttpContext.SignInAsync` / `SignOutAsync`.
+
+### Api
+
+The Api layer contains ASP.NET Core Minimal API extension methods that map HTTP routes to use-case invocations. The two endpoints are:
+
+- **`MapLogin`** — handles `POST /api/auth/login`, deserializes a `LoginRequest`, delegates to `AuthenticateUser.ExecuteAsync`, and returns `200 OK` or a `400 Bad Request` with the error message.
+- **`MapLogout`** — handles `POST /api/auth/logout`, delegates to `LogoutUser.ExecuteAsync`, and redirects to `/login`.
+
+The extension methods are registered in `Program.cs` with `app.MapLogin()` and `app.MapLogout()`, keeping route setup in one place.
+
+### UI
+
+The UI layer is a Blazor Server application. Components and pages are purely presentational — they inject use cases directly via the ASP.NET Core DI container and never touch repositories or database contexts. The `<AuthorizeView>` component and `[Authorize]` attribute gate access to admin pages. Because the UI layer sits outside the Application layer in the dependency graph, it can be replaced by a different frontend (e.g., Blazor WebAssembly, a separate React SPA) without any business logic changes.
+
+## Service registration
+
+`Program.cs` wires every port to its adapter and registers each use case as a scoped service, following the standard ASP.NET Core DI pattern:
+
+```csharp Program.cs
+// Ports -> Adapters
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IPasswordHasher, IdentityPasswordHasher>();
+builder.Services.AddScoped<ISessionManager, CookieSessionManager>();
+
+// Use cases
+builder.Services.AddScoped<AuthenticateUser>();
+builder.Services.AddScoped<RegisterUser>();
+builder.Services.AddScoped<LogoutUser>();
+```
+
+Because all three use cases are scoped, a fresh instance is created per HTTP request, keeping them stateless and safe for concurrent Blazor Server circuits.
+
+## Request flow
+
+The following describes how a login request travels through every layer, from the browser to the cookie being set:
+
+1. **HTTP POST `/api/auth/login`** arrives at the ASP.NET Core pipeline.
+2. **Api layer** — `MapLogin` deserializes the request body into a `LoginRequest` DTO and calls `AuthenticateUser.ExecuteAsync(email, password)`.
+3. **Application layer** — `AuthenticateUser` calls `IUserRepository.GetByEmailAsync(email)` to fetch the user record.
+4. **Infrastructure (UserRepository)** — EF Core executes a `SELECT` against the SQLite `Users` table and returns a `User?`.
+5. **Application layer** — `AuthenticateUser` passes the stored hash and the submitted password to `IPasswordHasher.Verify(hashedPassword, password)`.
+6. **Infrastructure (IdentityPasswordHasher)** — delegates to ASP.NET Core Identity's `IPasswordHasher<User>.VerifyHashedPassword` and returns `true` or `false`.
+7. **Application layer** — on success, calls `ISessionManager.SignInAsync(user)`.
+8. **Infrastructure (CookieSessionManager)** — builds a `ClaimsPrincipal` with `NameIdentifier` and `Email` claims and calls `HttpContext.SignInAsync`, issuing the authentication cookie.
+9. **Api layer** — `MapLogin` receives `AuthResult.Ok()` and returns `200 OK` to the browser.
+10. The browser stores the cookie; all subsequent requests are authenticated automatically.

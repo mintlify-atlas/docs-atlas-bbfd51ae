@@ -1,0 +1,123 @@
+---
+title: "CookieSessionManager and IdentityPasswordHasher implementations"
+sidebarTitle: "Session Manager"
+description: "Reference for CookieSessionManager (ISessionManager) and IdentityPasswordHasher (IPasswordHasher) — the infrastructure implementations for auth session and password hashing."
+---
+
+Two infrastructure classes implement the auth-related port interfaces: `CookieSessionManager` handles session lifecycle (sign-in and sign-out) via ASP.NET Core cookie authentication, and `IdentityPasswordHasher` wraps `Microsoft.AspNetCore.Identity.IPasswordHasher<User>` to provide secure PBKDF2-backed password hashing. Both classes live in the `Infrastructure.Auth` namespace and have no direct dependencies on the `Domain` or `Application` layers beyond the interfaces they satisfy.
+
+## CookieSessionManager
+
+**Implements:** `ISessionManager`  
+**Dependency:** `IHttpContextAccessor` (injected via constructor)
+
+`CookieSessionManager` translates domain-level auth operations into ASP.NET Core cookie-auth calls. It relies on `IHttpContextAccessor` to reach the current `HttpContext` at runtime, which is required because Blazor Server components do not expose `HttpContext` directly after the initial request handshake.
+
+### SignInAsync(User user)
+
+Constructs a `ClaimsPrincipal` containing two claims:
+
+| Claim type | Value |
+|---|---|
+| `ClaimTypes.NameIdentifier` | `user.Id.ToString()` |
+| `ClaimTypes.Email` | `user.Email` |
+
+The claims are wrapped in a `ClaimsIdentity` using `CookieAuthenticationDefaults.AuthenticationScheme` as the authentication type, then passed to `HttpContext.SignInAsync`. ASP.NET Core serialises the principal into an encrypted cookie and sends it to the browser.
+
+### SignOutAsync()
+
+Calls `HttpContext.SignOutAsync` with `CookieAuthenticationDefaults.AuthenticationScheme`. This instructs ASP.NET Core to issue a response that clears the authentication cookie from the browser, effectively ending the session.
+
+**Full source**
+
+```csharp Infrastructure/Auth/CookieSessionManager.cs
+public class CookieSessionManager : ISessionManager
+{
+    private readonly IHttpContextAccessor _accessor;
+
+    public CookieSessionManager(IHttpContextAccessor accessor)
+    {
+        _accessor = accessor;
+    }
+
+    public Task SignInAsync(User user)
+    {
+        var claims = new []
+        {
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Email, user.Email),
+        };
+        var identity = new ClaimsIdentity(
+            claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = new ClaimsPrincipal(identity);
+        return _accessor.HttpContext!.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme, principal);
+    }
+
+    public Task SignOutAsync()
+    {
+        return _accessor.HttpContext!.SignOutAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme);
+    }
+}
+```
+
+<Note>
+  `IHttpContextAccessor` must be registered in DI for `CookieSessionManager` to function. This is done in `Program.cs` with `builder.Services.AddHttpContextAccessor()`. Without this registration, the injected accessor will throw a `NullReferenceException` when `_accessor.HttpContext` is accessed inside a Blazor Server circuit.
+</Note>
+
+---
+
+## IdentityPasswordHasher
+
+**Implements:** `IPasswordHasher`  
+**Dependency:** `IPasswordHasher<User>` from `Microsoft.Extensions.Identity.Core` (injected via constructor)
+
+`IdentityPasswordHasher` is a thin adapter that satisfies the domain's `IPasswordHasher` port by delegating to ASP.NET Core Identity's built-in `PasswordHasher<T>`. This keeps the `Domain` and `Application` layers free of any Identity framework reference while still benefiting from Identity's hardened hashing implementation.
+
+### Hash(string rawPassword)
+
+Delegates to `_inner.HashPassword(new User(), rawPassword)`. Returns the Base64-encoded hash string produced by Identity's PBKDF2 implementation. This string is stored directly in `User.PasswordHash` via `User.Create`.
+
+### Verify(string hashedPassword, string password)
+
+Calls `_inner.VerifyHashedPassword(new User(), hashedPassword, password)` and returns `true` only when the result is `PasswordVerificationResult.Success`. The `PasswordVerificationResult.SuccessRehashNeeded` result (returned when the hash was produced with an older algorithm version) is treated as a failure — the caller is responsible for re-hashing on successful login if rehash support is needed.
+
+**Full source**
+
+```csharp Infrastructure/Auth/IdentityPasswordHasher.cs
+public class IdentityPasswordHasher : IPasswordHasher
+{
+    private readonly IPasswordHasher<User> _inner;
+
+    public IdentityPasswordHasher(IPasswordHasher<User> inner)
+    {
+        _inner = inner;
+    }
+
+    public bool Verify(string hashedPassword, string password)
+    {
+        var result = _inner.VerifyHashedPassword(
+            new User(), hashedPassword, password);
+        return result is PasswordVerificationResult.Success;
+    }
+
+    public string Hash(string rawPassword)
+    {
+        return _inner.HashPassword(new User(), rawPassword);
+    }
+}
+```
+
+**DI registration**
+
+```csharp Program.cs
+builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+builder.Services.AddScoped<IPasswordHasher, IdentityPasswordHasher>();
+```
+
+Both registrations are `Scoped`. `PasswordHasher<User>` is the concrete Identity implementation, and `IdentityPasswordHasher` wraps it to satisfy the domain-facing `IPasswordHasher` interface.
+
+<Info>
+  ASP.NET Core Identity uses **PBKDF2 with HMAC-SHA512** by default (format version 3), with 100,000 iterations and a 128-bit salt. The hash format version is embedded as the first byte of the stored hash, allowing future algorithm upgrades without invalidating existing hashes — Identity will return `PasswordVerificationResult.SuccessRehashNeeded` for hashes produced under an older version, signalling that the application should re-hash the password on the next successful login.
+</Info>

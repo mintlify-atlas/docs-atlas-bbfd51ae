@@ -1,0 +1,122 @@
+---
+title: "POST /api/auth/logout — sign out the current user"
+sidebarTitle: "POST /api/auth/logout"
+description: "POST /api/auth/logout signs out the currently authenticated user by clearing the authentication cookie and redirects to /login."
+---
+
+This endpoint requires the caller to be authenticated (`.RequireAuthorization()` is applied at registration time). It delegates to `LogoutUser.ExecuteAsync()`, which calls `ISessionManager.SignOutAsync()` — implemented by `CookieSessionManager` — to clear the ASP.NET Core authentication cookie. Once the cookie is invalidated, the server issues a `302 Found` redirect to `/login`, returning the browser to the public login page.
+
+## Request
+
+<CardGroup cols={2}>
+  <Card title="Method" icon="arrow-up-from-bracket">
+    `POST`
+  </Card>
+  <Card title="Path" icon="link">
+    `/api/auth/logout`
+  </Card>
+</CardGroup>
+
+**Auth required:** Yes — the request must include the `.AspNetCore.Cookies` authentication cookie issued by `POST /api/auth/login`. Requests without a valid cookie are rejected with `401 Unauthorized`.
+
+**Request body:** None. This endpoint takes no parameters.
+
+### Request example
+
+```bash cURL
+curl -b cookies.txt -X POST https://localhost:7140/api/auth/logout
+```
+
+<Tip>
+  The `-b cookies.txt` flag tells cURL to send the cookies saved during the login call (`-c cookies.txt`). Without it the request will be rejected with `401 Unauthorized`.
+</Tip>
+
+## Responses
+
+<CardGroup cols={2}>
+  <Card title="302 Found" icon="arrow-right-from-bracket">
+    Logout succeeded. The authentication cookie is expired via `Set-Cookie`, and the client is redirected to `/login`.
+  </Card>
+  <Card title="401 Unauthorized" icon="lock">
+    The request was not authenticated. No valid authentication cookie was present. The user is effectively already logged out.
+  </Card>
+</CardGroup>
+
+### Response example
+
+```http 302 Found
+HTTP/1.1 302 Found
+Location: /login
+Set-Cookie: .AspNetCore.Cookies=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+```
+
+### Response fields
+
+<ResponseField name="Location (302)" type="string">
+  Always `/login`. The redirect is hard-coded in the handler via `Results.Redirect("/login")`.
+</ResponseField>
+
+<ResponseField name="Set-Cookie (302)" type="string">
+  The authentication cookie is overwritten with an empty value and a past expiry date, causing the browser to delete it immediately.
+</ResponseField>
+
+## Antiforgery note
+
+<Note>
+  This endpoint has `.DisableAntiforgery()` applied at registration. This allows the `Admin.razor` HTML `<form>` to submit `POST /api/auth/logout` without an antiforgery token. This is intentional: Blazor's built-in antiforgery token infrastructure is not automatically available to standard HTML forms rendered outside a Blazor form context, so requiring it here would cause all logout attempts from the admin UI to fail with a `400 Bad Request`.
+</Note>
+
+## Source reference
+
+The full endpoint registration and handler are defined in `Api/Auth/Logout.cs`:
+
+```csharp Logout.cs
+public static IEndpointRouteBuilder MapLogout(this IEndpointRouteBuilder routes)
+{
+    routes.MapPost("/api/auth/logout", HandleAsync)
+        .RequireAuthorization()
+        .DisableAntiforgery();
+    return routes;
+}
+
+public static async Task<IResult> HandleAsync(LogoutUser useCase)
+{
+    await useCase.ExecuteAsync();
+    return Results.Redirect("/login");
+}
+```
+
+The `LogoutUser` use case delegates sign-out to the `ISessionManager` abstraction:
+
+```csharp LogoutUser.cs
+public class LogoutUser
+{
+    private readonly ISessionManager _sessionManager;
+
+    public LogoutUser(ISessionManager sessionManager)
+    {
+        _sessionManager = sessionManager;
+    }
+
+    public async Task ExecuteAsync()
+    {
+        await _sessionManager.SignOutAsync();
+    }
+}
+```
+
+The endpoint is registered in `Program.cs` alongside the login route:
+
+```csharp Program.cs
+app.UseAuthentication();
+app.UseAuthorization();
+
+// ...
+
+app.MapLogin();
+app.MapLogout();
+```
+
+<Warning>
+  Because `.RequireAuthorization()` is applied, the authorization middleware **must** be registered in `Program.cs` via `app.UseAuthorization()` — and `app.UseAuthentication()` must appear before it — otherwise all requests to this endpoint will either pass without authentication checks or fail at middleware resolution.
+</Warning>

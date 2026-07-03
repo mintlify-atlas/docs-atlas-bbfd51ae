@@ -1,0 +1,200 @@
+---
+title: "Application port interfaces: repositories and services"
+sidebarTitle: "Interfaces"
+description: "Reference for IUserRepository, IPasswordHasher, and ISessionManager — the port interfaces that decouple Application use cases from infrastructure implementations."
+---
+
+The Application layer defines three port interfaces that act as contracts between the business logic and the infrastructure adapters. By depending only on these abstractions, the use cases remain fully independent of EF Core, ASP.NET Core Identity, and cookie middleware — any of those can be swapped without touching a single line of business logic.
+
+---
+
+## IUserRepository
+
+Provides read and write access to the user store. Defined in
+`Application/Interfaces/Repositories` to signal that it is a persistence port,
+not a service.
+
+```csharp Application/Interfaces/Repositories/IUserRepository.cs
+public interface IUserRepository
+{
+    Task<User?> GetByEmailAsync(string email);
+    Task AddAsync(User user);
+}
+```
+
+### Methods
+
+<ParamField path="GetByEmailAsync" type="Task<User?>">
+  Looks up a user by their email address. Returns `null` when no matching
+  record exists. Used by both `AuthenticateUser` (to verify credentials) and
+  `RegisterUser` (to detect duplicate registrations).
+</ParamField>
+
+<ParamField path="AddAsync" type="Task">
+  Persists a newly created `User` entity and saves changes to the underlying
+  store. Called by `RegisterUser` after `User.Create(...)` builds the domain
+  object.
+</ParamField>
+
+### Return values
+
+<ResponseField name="GetByEmailAsync" type="Task<User?>">
+  Resolves to the matching `User` entity, or `null` if the email is not
+  registered.
+</ResponseField>
+
+<ResponseField name="AddAsync" type="Task">
+  Completes once the record has been written and the EF Core change tracker has
+  been flushed. Throws on constraint violations (e.g., duplicate email at the
+  database level).
+</ResponseField>
+
+### Infrastructure implementation
+
+`UserRepository` in the Infrastructure layer wraps an EF Core `DbContext`
+backed by SQLite. It executes `FirstOrDefaultAsync` for lookups and calls
+`SaveChangesAsync` after every write.
+
+<Note>
+  The interface intentionally exposes only the two operations that the current
+  use cases require. Additional query methods (e.g., `GetByIdAsync`) should be
+  added to the interface and implementation together, driven by a new use-case
+  need — never speculatively.
+</Note>
+
+---
+
+## IPasswordHasher
+
+Abstracts password hashing and verification so that the hashing algorithm can
+be swapped without touching any use-case code.
+
+```csharp Application/Interfaces/Services/IPasswordHasher.cs
+public interface IPasswordHasher
+{
+    bool Verify(string hashedPassword, string password);
+    string Hash(string rawPassword);
+}
+```
+
+### Methods
+
+<ParamField path="Hash" type="string">
+  Accepts a plain-text password and returns a hashed string suitable for
+  storage. Called by the domain factory `User.Create(...)` during registration.
+  The raw password is never stored.
+</ParamField>
+
+<ParamField path="Verify" type="bool">
+  Compares a plain-text password candidate against a previously hashed value.
+  Returns `true` when they match, `false` otherwise. Called by
+  `AuthenticateUser.ExecuteAsync` during login.
+</ParamField>
+
+### Return values
+
+<ResponseField name="Hash" type="string">
+  A hashed representation of the raw password. The format is determined by the
+  underlying implementation (BCrypt, PBKDF2, etc.).
+</ResponseField>
+
+<ResponseField name="Verify" type="bool">
+  `true` when the plain-text password matches the stored hash; `false` when it
+  does not.
+</ResponseField>
+
+### Infrastructure implementation
+
+`IdentityPasswordHasher` wraps `Microsoft.AspNetCore.Identity.IPasswordHasher<User>`,
+which uses PBKDF2 with HMAC-SHA256 by default. Swapping to BCrypt or Argon2
+requires only a new implementation class registered in the DI container —
+no use-case changes.
+
+<Warning>
+  `IPasswordHasher.Hash` must be called only at account-creation time. Never
+  re-hash a value that is already hashed; always pass the original plain-text
+  input.
+</Warning>
+
+---
+
+## ISessionManager
+
+Abstracts the creation and revocation of authenticated sessions (authentication
+cookies). Keeps ASP.NET Core's cookie middleware out of the Application layer.
+
+```csharp Application/Interfaces/Services/ISessionManager.cs
+public interface ISessionManager
+{
+    Task SignInAsync(User user);
+    Task SignOutAsync();
+}
+```
+
+### Methods
+
+<ParamField path="SignInAsync" type="Task">
+  Creates an authentication cookie for the given user. The implementation
+  builds a `ClaimsPrincipal` from the user's ID and email, then calls
+  `HttpContext.SignInAsync` with the configured cookie scheme.
+</ParamField>
+
+<ParamField path="SignOutAsync" type="Task">
+  Revokes the current user's authentication cookie by calling
+  `HttpContext.SignOutAsync`. Safe to call even when no session is active —
+  the underlying middleware treats it as a no-op in that case.
+</ParamField>
+
+### Return values
+
+<ResponseField name="SignInAsync" type="Task">
+  Completes once the authentication cookie has been written to the HTTP
+  response. Throws if `IHttpContextAccessor.HttpContext` is `null` (i.e.,
+  called outside of an active HTTP request).
+</ResponseField>
+
+<ResponseField name="SignOutAsync" type="Task">
+  Completes once the sign-out has been processed and the cookie removed from
+  the response.
+</ResponseField>
+
+### Infrastructure implementation
+
+`CookieSessionManager` uses `IHttpContextAccessor` to access the current
+`HttpContext` and delegates to ASP.NET Core's built-in cookie authentication
+handler. Claims written during `SignInAsync`:
+
+| Claim | Value |
+|---|---|
+| `ClaimTypes.NameIdentifier` | `user.Id.ToString()` |
+| `ClaimTypes.Email` | `user.Email` |
+
+<Info>
+  Because Blazor Server runs on a persistent SignalR circuit rather than
+  discrete HTTP requests, `IHttpContextAccessor` is injected at startup before
+  the circuit is established. `CookieSessionManager` captures the context at
+  the moment of the initial HTTP handshake, which is the only point at which
+  cookie auth can write response headers.
+</Info>
+
+---
+
+## DI wiring
+
+All three interfaces are registered in `Program.cs` with scoped lifetime,
+matching the per-request / per-circuit lifecycle of both HTTP and Blazor Server
+contexts.
+
+```csharp Program.cs
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IPasswordHasher, IdentityPasswordHasher>();
+builder.Services.AddScoped<ISessionManager, CookieSessionManager>();
+```
+
+<Tip>
+  To swap implementations — for example, to use a PostgreSQL-backed repository
+  or a third-party authentication provider — only the infrastructure adapter
+  needs to change. Register the new class against the same interface and the
+  use cases will pick it up automatically. The `Application` project requires
+  zero modifications.
+</Tip>

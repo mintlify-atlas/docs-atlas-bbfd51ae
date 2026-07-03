@@ -1,0 +1,104 @@
+---
+title: "Configure Porfolio & Blog CMS for development and production"
+sidebarTitle: "Configuration"
+description: "Configure the application's connection string, logging levels, authentication cookie path, and environment-specific settings in appsettings.json."
+---
+
+Configuration in the Porfolio & Blog CMS follows ASP.NET Core's standard layered settings system. The base `appsettings.json` file defines values that apply across all environments, while `appsettings.{Environment}.json` layers environment-specific overrides on top. The three key knobs you'll interact with are the **SQLite connection string**, **logging verbosity levels**, and — in the Development environment only — the **seed credentials** used to bootstrap the first admin user.
+
+## appsettings.json
+
+This file is always loaded regardless of environment. It sets the shared baseline for logging and database access.
+
+```json appsettings.json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "ConnectionStrings": {
+    "Default": "Data Source=blog.db"
+  }
+}
+```
+
+| Key | Description |
+|-----|-------------|
+| `ConnectionStrings.Default` | Path to the SQLite database file. The default value `Data Source=blog.db` places the database in the project root directory. In production, update this to a persistent absolute path outside the application directory. |
+| `Logging.LogLevel.Default` | Minimum log level applied to all log categories that don't have a more specific rule. `Information` means informational messages, warnings, and errors are all captured. |
+| `Logging.LogLevel.Microsoft.AspNetCore` | Overrides the log level specifically for ASP.NET Core framework internals. Set to `Warning` to suppress the high volume of request-routing and middleware trace messages that would otherwise flood your logs. |
+| `AllowedHosts` | A semicolon-delimited list of hostnames the server will respond to. The wildcard `*` accepts every hostname. In production, replace this with your actual domain (e.g., `"yourdomain.com"`) to prevent host-header injection attacks. |
+
+## appsettings.Development.json
+
+When `ASPNETCORE_ENVIRONMENT` is `Development`, ASP.NET Core merges this file on top of `appsettings.json`. It extends logging configuration and introduces the `Seed` section consumed exclusively by `AdminUserSeeder` at startup.
+
+```json appsettings.Development.json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "Seed": {
+    "AdminEmail": "admin@andresblog.com",
+    "AdminPassword": "Admin123!"
+  }
+}
+```
+
+The `Seed` section provides the credentials that `AdminUserSeeder` uses to create the first admin account. `AdminEmail` becomes the login username and `AdminPassword` is hashed before being stored in the database. Because `AdminUserSeeder` checks `IWebHostEnvironment.IsDevelopment()` before doing anything, these values are **completely ignored in Production** — you do not need to strip them from the file when deploying, but it is best practice to do so. See the [Seeding](/seeding) page for a full walkthrough of how the seeder works.
+
+## Launch profiles
+
+The `Properties/launchSettings.json` file defines two run profiles that the `dotnet run` command and IDEs can use. Both profiles set `ASPNETCORE_ENVIRONMENT=Development` automatically, so `appsettings.Development.json` is always active during local development.
+
+| Profile | URL(s) | Notes |
+|---------|--------|-------|
+| `http` | `http://localhost:5058` | HTTP only; simplest option for local development |
+| `https` | `https://localhost:7140` and `http://localhost:5058` | Enables TLS; requires a trusted development certificate |
+
+```bash
+# Start with the HTTP profile
+dotnet run --launch-profile http
+
+# Start with the HTTPS profile
+dotnet run --launch-profile https
+```
+
+Both profiles set `"launchBrowser": true`, so your default browser opens automatically on startup. To disable this behaviour, set `"launchBrowser": false` in the relevant profile inside `launchSettings.json`.
+
+## Cookie authentication configuration
+
+Authentication is handled via ASP.NET Core's built-in cookie middleware, registered in `Program.cs` as follows:
+
+```csharp Program.cs
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(o =>
+    {
+        o.LoginPath = "/login";
+    });
+```
+
+Setting `LoginPath = "/login"` tells the cookie middleware where to redirect unauthenticated users when they attempt to access a protected resource. Any request that arrives without a valid authentication cookie is automatically redirected to `/login` with the original URL preserved in a `ReturnUrl` query parameter, so the user lands back on the page they requested after a successful sign-in.
+
+<Note>
+  The cookie authentication scheme is set as the **default** scheme via `CookieAuthenticationDefaults.AuthenticationScheme`, meaning you don't need to specify it explicitly on individual `[Authorize]` attributes.
+</Note>
+
+## Production checklist
+
+Before deploying to a public environment, work through the following items:
+
+<Warning>
+  **Do not skip these steps.** Deploying with Development defaults exposes your application to unnecessary risk.
+
+  - **Change `AllowedHosts`** — replace `"*"` with your actual domain name (e.g., `"yourdomain.com"`) to prevent host-header injection attacks.
+  - **Update `ConnectionStrings.Default`** — point the SQLite data source to a persistent absolute path outside the application directory so the database survives redeployments (e.g., `"Data Source=/var/data/blog.db"`).
+  - **Remove or override `Seed:AdminEmail` / `Seed:AdminPassword`** — the seeder only runs in Development, but removing these values from any production config files reduces the risk of credential exposure in version control or environment dumps.
+  - **Set `ASPNETCORE_ENVIRONMENT=Production`** — this disables the developer exception page, enables HSTS, and ensures the `appsettings.Development.json` overlay is never loaded.
+</Warning>

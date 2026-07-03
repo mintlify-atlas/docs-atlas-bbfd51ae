@@ -1,0 +1,98 @@
+---
+title: "Admin panel: protected dashboard in Blazor Server"
+sidebarTitle: "Admin Panel"
+description: "The /admin page is a protected Blazor Server component. It requires authentication, shows the logged-in user's email, and provides a logout button."
+---
+
+The admin panel at `/admin` is a Blazor Server page decorated with `[Authorize]`. It uses `<AuthorizeView>` to conditionally render content based on the current authentication state, greeting the logged-in user by email and offering a logout button. Unauthenticated users are automatically redirected to `/login` before the page is rendered.
+
+## Route and attributes
+
+Three directives at the top of `Admin.razor` govern how the page is served and who can access it:
+
+```razor Admin.razor (page directives)
+@page "/admin"
+@rendermode InteractiveServer
+@attribute [Authorize]
+```
+
+| Directive | Effect |
+|---|---|
+| `@page "/admin"` | Registers the component at the `/admin` route |
+| `@rendermode InteractiveServer` | Activates a live SignalR circuit so the component can respond to authentication state changes in real time |
+| `@attribute [Authorize]` | Marks the page as protected — the ASP.NET Core authorisation middleware enforces this before the component renders |
+
+Because `LoginPath` is set to `"/login"` in `Program.cs`, any request to `/admin` from an unauthenticated user triggers an automatic redirect to `/login`:
+
+```csharp Program.cs (cookie authentication setup)
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(o =>
+    {
+        o.LoginPath = "/login";
+    });
+```
+
+## AuthorizeView pattern
+
+Inside the component, `<AuthorizeView>` splits the UI into two branches depending on whether the current user is authenticated:
+
+```razor Admin.razor
+<AuthorizeView>
+    <Authorized>
+        <div class="alert alert-sucess">
+            Bienvenido, <strong>@context.User.FindFirst(ClaimTypes.Email)?.Value</strong>.
+            <p>Tienes rol admin.</p>
+        </div>
+
+        <form action="api/auth/logout" method="post">
+            <button type="submit" class="btn btn-danger">
+                Cerrar sesión
+            </button>
+        </form>
+    </Authorized>
+    <NotAuthorized>
+        <p>Necesitas iniciar sesión para acceder aquí.</p>
+    </NotAuthorized>
+</AuthorizeView>
+```
+
+- **`<Authorized>`** — rendered when the user has a valid authentication cookie. The `context` parameter exposes the `ClaimsPrincipal`, so `context.User.FindFirst(ClaimTypes.Email)?.Value` reads the email claim that was written into the cookie at login time.
+- **`<NotAuthorized>`** — rendered when the authentication state is unknown or the user is not authenticated. In practice this branch is rarely visible because `[Authorize]` already redirects to `/login`, but it acts as a safe fallback inside the component tree.
+
+## Logout flow
+
+The logout button is a plain HTML `<form>` that `POST`s to the minimal API endpoint `/api/auth/logout`:
+
+```razor Admin.razor (logout form)
+<form action="api/auth/logout" method="post">
+    <button type="submit" class="btn btn-danger">
+        Cerrar sesión
+    </button>
+</form>
+```
+
+Using `method="post"` is intentional — it ensures the browser always sends a full HTTP request rather than a navigation, which is the correct pattern for state-mutating logout operations.
+
+The request is handled by `MapLogout()` in `Program.cs`, which maps the `LogoutUser` use case to the endpoint. The use case calls `ISessionManager.SignOutAsync()` (implemented by `CookieSessionManager`), which invokes ASP.NET Core's `HttpContext.SignOutAsync()` to clear the authentication cookie and then redirects the browser to `/login`.
+
+The logout endpoint is registered with `DisableAntiforgery()` so the plain HTML form does not require an antiforgery token — the form is only accessible to authenticated users (by virtue of being on the `/admin` page) and does nothing more than sign out, so CSRF risk is minimal.
+
+## Cascading authentication state
+
+For `<AuthorizeView>` and `[Authorize]` to work inside a Blazor Server circuit, the `AuthenticationState` must flow down the component tree as a cascading value. This is registered once in `Program.cs`:
+
+```csharp Program.cs (cascading auth state)
+builder.Services.AddCascadingAuthenticationState();
+```
+
+`AddCascadingAuthenticationState()` injects a root-level `CascadingAuthenticationState` component that wraps the entire Blazor application. Every component that needs authentication state — whether via `<AuthorizeView>`, `[CascadingParameter] Task<AuthenticationState>`, or the `AuthorizeRouteView` component — receives it automatically without any additional `@inject` directives.
+
+<Note>
+  `AddCascadingAuthenticationState()` was introduced in .NET 8 as a cleaner alternative to wrapping the router manually in `<CascadingAuthenticationState>`. It must be called before `builder.Services.AddRazorComponents()` takes effect, but the order in the `Program.cs` DI registration is flexible.
+</Note>
+
+## Extending the admin panel
+
+<Tip>
+  To add new admin features — such as blog post management, portfolio entry editing, or user management — create new Blazor components and place them inside the `<Authorized>` block of `Admin.razor`, or create dedicated sub-pages under `UI/Pages/Admin/` (for example, `UI/Pages/Admin/Posts.razor`). Any new sub-page should carry the same `@attribute [Authorize]` and `@rendermode InteractiveServer` directives to maintain consistent protection and interactivity. Add a corresponding `<NavLink>` in `NavMenu.razor` so authenticated users can navigate to the new section.
+</Tip>

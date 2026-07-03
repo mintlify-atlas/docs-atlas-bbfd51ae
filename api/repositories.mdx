@@ -1,0 +1,94 @@
+---
+title: "UserRepository: EF Core implementation of IUserRepository"
+sidebarTitle: "UserRepository"
+description: "UserRepository is the EF Core + SQLite implementation of IUserRepository, providing GetByEmailAsync and AddAsync methods backed by AppDbContext."
+---
+
+`UserRepository` implements `IUserRepository` using EF Core 10 and a SQLite database via `AppDbContext`. It is registered as `Scoped` in DI, meaning one instance is created per HTTP request and shared across all services resolved within that same request lifetime.
+
+## Methods
+
+### GetByEmailAsync
+
+```csharp
+Task<User?> GetByEmailAsync(string email)
+```
+
+Queries the `Users` DbSet for the first record whose `Email` column matches the supplied string. The comparison is performed by the database engine (case sensitivity depends on the SQLite collation). Returns `null` when no matching user is found. Internally delegates to EF Core's `FirstOrDefaultAsync`, keeping the call fully asynchronous and avoiding blocking the thread pool.
+
+### AddAsync
+
+```csharp
+Task AddAsync(User user)
+```
+
+Attaches the entity to the EF Core change tracker in the `Added` state and immediately flushes it to the database by calling `SaveChangesAsync()`. After this method completes, `user.Id` will be populated with the auto-incremented value assigned by SQLite.
+
+**Full source**
+
+```csharp Infrastructure/Persistence/Repositories/UserRepository.cs
+public class UserRepository : IUserRepository
+{
+    private readonly AppDbContext _db;
+
+    public UserRepository(AppDbContext db)
+    {
+        _db = db;
+    }
+
+    public Task<User?> GetByEmailAsync(string email)
+    {
+        return _db.Users.FirstOrDefaultAsync(x => x.Email == email);
+    }
+
+    public async Task AddAsync(User user)
+    {
+        await _db.Users.AddAsync(user);
+        await _db.SaveChangesAsync();
+    }
+}
+```
+
+## AppDbContext
+
+`AppDbContext` extends EF Core's `DbContext` and defines the single `Users` DbSet. The only explicit configuration applied is a unique index on the `Email` column, enforced at the schema level.
+
+```csharp Infrastructure/Persistence/Context/AppDbContext.cs
+public class AppDbContext : DbContext
+{
+    public DbSet<User> Users => Set<User>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<User>().HasIndex(u => u.Email).IsUnique();
+    }
+}
+```
+
+The `Users` property uses `Set<User>()` rather than an auto-property backed field, which is the recommended pattern in EF Core 8+ to avoid nullable reference warning noise while keeping the DbSet non-nullable in consuming code.
+
+## DI registration
+
+`AppDbContext` is registered with the SQLite provider, and `UserRepository` is bound to the `IUserRepository` interface — both as `Scoped` services:
+
+```csharp Program.cs
+builder.Services.AddDbContext<AppDbContext>(opts =>
+    opts.UseSqlite(builder.Configuration.GetConnectionString("Default")));
+
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+```
+
+The `Default` connection string is read from `appsettings.json` (or environment-specific overrides). For SQLite the value is typically a file path, e.g.:
+
+```json appsettings.json
+{
+  "ConnectionStrings": {
+    "Default": "Data Source=portfolio.db"
+  }
+}
+```
+
+<Tip>
+  To switch from SQLite to PostgreSQL or SQL Server, change only the `UseSqlite` call in `Program.cs` to `UseNpgsql` or `UseSqlServer` and update the connection string accordingly. `UserRepository`, `AppDbContext`, and all use-case classes are entirely unchanged — the repository pattern isolates them from the underlying database provider.
+</Tip>

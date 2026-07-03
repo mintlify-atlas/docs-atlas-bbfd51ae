@@ -1,0 +1,132 @@
+---
+title: "POST /api/auth/login — authenticate a user"
+sidebarTitle: "POST /api/auth/login"
+description: "POST /api/auth/login authenticates a user with email and password. On success, sets an authentication cookie. Returns 200 OK or 400 Bad Request."
+---
+
+This endpoint accepts a JSON body containing `email` and `password`, delegates credential verification to `AuthenticateUser.ExecuteAsync`, and—on success—sets an `HttpOnly` authentication cookie via `CookieSessionManager.SignInAsync`. If the credentials are invalid (user not found or wrong password), the use case returns `AuthResult.Fail("Credenciales incorrectas.")` and the endpoint responds with `400 Bad Request`, including the error string in the response body.
+
+## Request
+
+<CardGroup cols={2}>
+  <Card title="Method" icon="arrow-up-from-bracket">
+    `POST`
+  </Card>
+  <Card title="Path" icon="link">
+    `/api/auth/login`
+  </Card>
+</CardGroup>
+
+**Content-Type:** `application/json`
+
+### Body parameters
+
+<ParamField body="email" type="string" required>
+  The user's email address. Must match an existing account in the database.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The user's plain-text password. Verified against the stored BCrypt hash via `IPasswordHasher.Verify`.
+</ParamField>
+
+<ParamField body="rememberMe" type="boolean" default="false">
+  Extend the session duration. The field is accepted and deserialized by the `LoginRequest` DTO but is **not yet wired** to cookie persistence — the session lifetime is currently controlled solely by the cookie authentication options in `Program.cs`.
+</ParamField>
+
+### Request example
+
+```json Request body
+{
+  "email": "admin@andresblog.com",
+  "password": "Admin123!"
+}
+```
+
+```bash cURL
+curl -c cookies.txt -X POST https://localhost:7140/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@andresblog.com","password":"Admin123!"}'
+```
+
+## Responses
+
+<CardGroup cols={2}>
+  <Card title="200 OK" icon="circle-check">
+    Authentication succeeded. The response includes a `Set-Cookie` header carrying the ASP.NET Core authentication cookie. Subsequent requests must send this cookie to access protected resources.
+  </Card>
+  <Card title="400 Bad Request" icon="circle-xmark">
+    Authentication failed — either the email does not exist or the password does not match. The response body is the plain-text error string returned by `AuthResult.Fail`.
+  </Card>
+</CardGroup>
+
+### Response examples
+
+```http 200 OK
+HTTP/1.1 200 OK
+Set-Cookie: .AspNetCore.Cookies=<token>; path=/; httponly
+```
+
+```http 400 Bad Request
+HTTP/1.1 400 Bad Request
+Content-Type: text/plain
+
+Credenciales incorrectas.
+```
+
+### Response fields
+
+<ResponseField name="body (200)" type="empty">
+  The 200 response has no body. Authentication state is communicated exclusively through the `Set-Cookie` header.
+</ResponseField>
+
+<ResponseField name="body (400)" type="string">
+  A plain-text error message. The only value currently returned by the use case is `"Credenciales incorrectas."`, used for both unknown email and wrong password to avoid user enumeration.
+</ResponseField>
+
+## Source reference
+
+The full handler is defined in `Api/Auth/Login.cs`:
+
+```csharp Login.cs
+public static async Task<IResult> HandleAsync(
+    LoginRequest request,
+    AuthenticateUser useCase
+)
+{
+    var result = await useCase.ExecuteAsync(request.Email, request.Password);
+    return result.Success ? Results.Ok() : Results.BadRequest(result.Error);
+}
+```
+
+The `AuthenticateUser` use case resolves the user by email, verifies the password hash, and calls `ISessionManager.SignInAsync` (implemented by `CookieSessionManager`) to issue the cookie:
+
+```csharp AuthenticateUser.cs
+public async Task<AuthResult> ExecuteAsync(string email, string password)
+{
+    User? user = await _userRepository.GetByEmailAsync(email);
+
+    if (user == null)
+        return AuthResult.Fail("Credenciales incorrectas.");
+
+    if (!_passwordHasher.Verify(user.PasswordHash, password))
+        return AuthResult.Fail("Credenciales incorrectas.");
+
+    await _sessionManager.SignInAsync(user); // crea cookie
+
+    return AuthResult.Ok();
+}
+```
+
+The `AuthResult` DTO carries the outcome:
+
+```csharp AuthResult.cs
+public record AuthResult(bool Success, string? Error = null)
+{
+    public static AuthResult Ok()           => new(true);
+    public static AuthResult Fail(string error) => new(false, error);
+}
+```
+
+<Note>
+  The endpoint is registered in `Program.cs` with `app.MapLogin()`. The middleware pipeline order is important: `app.UseAuthentication()` must be called **before** `app.UseAuthorization()` for the cookie to be correctly set and validated on subsequent requests.
+</Note>

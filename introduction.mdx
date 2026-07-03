@@ -1,0 +1,50 @@
+---
+title: "Porfolio & Blog CMS: Personal site on ASP.NET Core"
+sidebarTitle: "Introduction"
+description: "Porfolio & Blog CMS is a self-hosted personal website built with ASP.NET Core 10 and Blazor Server, using Clean Architecture and cookie-based authentication."
+---
+
+Porfolio & Blog CMS is a self-hosted personal website built by Andrés Pérez Guardiola — Full Stack Developer. It combines a developer portfolio and a content management system for blog posts into a single, cohesive ASP.NET Core 10 application. The UI is rendered entirely with Blazor Server, meaning all component logic runs on the server and is streamed to the browser over a SignalR connection — no separate JavaScript framework required. The project is designed for developers who want full ownership of their personal site without relying on a third-party CMS platform, and whose codebase is structured to be extended with new portfolio entries and blog content over time.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Clean Architecture" icon="layer-group" href="/architecture">
+    Five clearly separated layers — Domain, Application, Infrastructure, Api, and UI — enforce strict dependency rules and make the codebase easy to extend or test independently.
+  </Card>
+  <Card title="Cookie Authentication" icon="lock" href="/authentication">
+    Secure cookie-based authentication powered by the ASP.NET Core cookie scheme and ASP.NET Core Identity's password hasher, with an auto-seeded admin account in Development.
+  </Card>
+  <Card title="SQLite with EF Core 10" icon="database" href="/database">
+    A lightweight SQLite database managed entirely through EF Core 10 migrations — no external database server required for local development or small deployments.
+  </Card>
+  <Card title="Blazor Server UI" icon="display" href="/ui-overview">
+    All pages are Blazor Server components, giving you real-time interactivity and full C# on both sides of the wire, with a layout system built around MainLayout and NavMenu.
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+| Technology | Role |
+|---|---|
+| **ASP.NET Core 10** | Web framework and dependency injection host |
+| **Blazor Server** | Interactive UI components rendered server-side |
+| **EF Core 10 + SQLite** | Object-relational mapper and embedded database engine |
+| **ASP.NET Core Identity** | Password hashing via `PasswordHasher<T>` |
+| **Cookie Authentication** | Session management through the ASP.NET Core cookie middleware |
+
+## Architecture Overview
+
+The project follows Clean Architecture, splitting concerns across five layers. Each layer has a single, well-defined responsibility, and the dependency rule is enforced strictly: outer layers depend on inner layers, never the reverse.
+
+| Layer | Responsibility |
+|---|---|
+| **Domain** | Core business entities and rules. Contains `User.cs` with no framework dependencies whatsoever. |
+| **Application** | Use cases, port interfaces (repositories and services), and DTOs. This layer orchestrates domain logic without touching infrastructure. |
+| **Infrastructure** | Concrete adapters that fulfil the Application interfaces — EF Core persistence, cookie session management, and Identity password hashing. |
+| **Api** | Minimal API endpoint registrations (`POST /api/auth/login`, `POST /api/auth/logout`) that delegate to Application use cases. |
+| **UI** | Blazor Server components and pages. Depends on Application use cases and is completely decoupled from Infrastructure concerns. |
+
+<Note>
+  Porfolio & Blog CMS is a personal portfolio project released under the Apache-2.0 license. The codebase is intentionally designed to grow: new Blazor pages, additional domain entities for blog posts and portfolio projects, and further API endpoints can be added by following the same layered conventions already in place.
+</Note>

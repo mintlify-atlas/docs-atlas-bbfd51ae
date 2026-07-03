@@ -1,0 +1,91 @@
+---
+title: "Codebase layout and layer responsibilities"
+sidebarTitle: "Project Structure"
+description: "Explore the five-layer Clean Architecture folder layout of Porfolio & Blog CMS and learn what each directory contains."
+---
+
+Porfolio & Blog CMS is organised around Clean Architecture principles. Every file lives in one of five named layers — **Domain**, **Application**, **Infrastructure**, **Api**, or **UI** — each of which maps directly to a top-level folder in the repository. This layout makes it straightforward to locate any piece of logic, understand what it depends on, and add new capabilities without violating the dependency rule.
+
+## Directory Tree
+
+```
+porfolio-blog/
+├── Domain/
+│   └── Entities/
+│       └── User.cs
+├── Application/
+│   ├── DTOs/
+│   │   ├── AuthResult.cs
+│   │   ├── LoginRequest.cs
+│   │   └── RegisterResult.cs
+│   ├── Interfaces/
+│   │   ├── Repositories/
+│   │   │   └── IUserRepository.cs
+│   │   └── Services/
+│   │       ├── IPasswordHasher.cs
+│   │       └── ISessionManager.cs
+│   └── UseCases/
+│       └── User/
+│           ├── AuthenticateUser.cs
+│           ├── RegisterUser.cs
+│           └── LogoutUser.cs
+├── Infrastructure/
+│   ├── Auth/
+│   │   ├── CookieSessionManager.cs
+│   │   └── IdentityPasswordHasher.cs
+│   └── Persistence/
+│       ├── Context/
+│       │   └── AppDbContext.cs
+│       ├── Migrations/
+│       ├── Repositories/
+│       │   └── UserRepository.cs
+│       └── Seed/
+│           └── AdminUserSeeder.cs
+├── Api/
+│   └── Auth/
+│       ├── Login.cs
+│       └── Logout.cs
+├── UI/
+│   ├── App.razor
+│   ├── Routes.razor
+│   ├── _Imports.razor
+│   ├── Layout/
+│   │   ├── MainLayout.razor
+│   │   ├── NavMenu.razor
+│   │   └── ReconnectModal.razor
+│   └── Pages/
+│       ├── Home.razor
+│       ├── Login/
+│       │   └── Login.razor
+│       └── Admin/
+│           └── Admin.razor
+├── wwwroot/
+│   └── app.css
+├── Program.cs
+├── appsettings.json
+├── appsettings.Development.json
+└── porfolio-blog.csproj
+```
+
+## Layer Responsibilities
+
+| Layer | Responsibility | Key Files |
+|---|---|---|
+| **Domain** | Business entities and rules with zero framework dependencies. Defines the core data model that all other layers build upon. | `User.cs` |
+| **Application** | Use cases that orchestrate domain logic, port interfaces that abstract infrastructure concerns, and DTOs that cross layer boundaries. | `AuthenticateUser.cs`, `IUserRepository.cs`, `ISessionManager.cs` |
+| **Infrastructure** | Concrete adapters that fulfil the Application interfaces — EF Core `AppDbContext`, cookie-based session management, Identity password hashing, and the development admin seeder. | `AppDbContext.cs`, `CookieSessionManager.cs`, `UserRepository.cs` |
+| **Api** | Minimal API endpoint registrations mounted in `Program.cs` via `MapLogin()` and `MapLogout()`. Each file defines a single endpoint that delegates immediately to an Application use case. | `Login.cs`, `Logout.cs` |
+| **UI** | Blazor Server components and pages. `App.razor` is the root component; `MainLayout.razor` and `NavMenu.razor` define the shell; individual pages live under `Pages/`. | `App.razor`, `MainLayout.razor`, `Admin.razor` |
+
+### Root-level files
+
+| File | Purpose |
+|---|---|
+| `Program.cs` | Application entry point — registers services (DB, auth, Blazor, use cases, seeder), builds the middleware pipeline, and maps routes. |
+| `appsettings.json` | Production configuration: SQLite connection string (`Data Source=blog.db`) and log levels. |
+| `appsettings.Development.json` | Development overrides: admin seed credentials (`AdminEmail`, `AdminPassword`). **Never deploy this file with default values.** |
+| `porfolio-blog.csproj` | Project file targeting `net10.0`, referencing EF Core 10, the SQLite provider, EF Core Tools, and `Microsoft.Extensions.Identity.Core`. |
+
+<Tip>
+  The **dependency rule** is the single most important constraint in Clean Architecture: source-code dependencies must always point inward. Domain knows nothing about Application; Application knows nothing about Infrastructure or the UI. If you find yourself importing an Infrastructure namespace inside the Application layer — or a Domain type importing from Application — that is a violation of the rule and a sign the code belongs in a different layer.
+</Tip>

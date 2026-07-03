@@ -1,0 +1,338 @@
+---
+title: "Application use cases: AuthenticateUser, RegisterUser, LogoutUser"
+sidebarTitle: "Use Cases"
+description: "Reference for the three application use cases in Porfolio & Blog CMS: AuthenticateUser, RegisterUser, and LogoutUser — each encapsulating a single business operation."
+---
+
+The Application layer exposes three use cases that represent the core business operations of the CMS. Each use case is a plain C# class registered in the DI container and injected wherever it is needed. They depend exclusively on port interfaces — never on concrete infrastructure — keeping the business logic fully decoupled from EF Core, Identity, or ASP.NET Core internals.
+
+---
+
+## AuthenticateUser
+
+Verifies a user's credentials and establishes an authenticated session by writing an authentication cookie.
+
+**Method signature**
+
+```csharp
+public async Task<AuthResult> ExecuteAsync(string email, string password)
+```
+
+### Parameters
+
+<ParamField path="email" type="string" required>
+  The email address submitted by the user on the login form. Used as the lookup
+  key in `IUserRepository`.
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  The plain-text password submitted by the user. It is never stored — it is
+  compared against the stored hash via `IPasswordHasher.Verify`.
+</ParamField>
+
+### Return value
+
+<ResponseField name="AuthResult" type="record">
+  <Expandable title="fields">
+    <ResponseField name="Success" type="bool">
+      `true` when the user was found and the password matched; `false` otherwise.
+    </ResponseField>
+    <ResponseField name="Error" type="string | null">
+      `null` on success. `"Credenciales incorrectas."` when the email is not
+      registered or when the password does not match the stored hash.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### How it works
+
+<Steps>
+  <Step title="Look up the user by email">
+    Calls `IUserRepository.GetByEmailAsync(email)`. If no record is found,
+    returns `AuthResult.Fail("Credenciales incorrectas.")` immediately —
+    intentionally avoiding a distinct "user not found" message to prevent user
+    enumeration.
+  </Step>
+  <Step title="Verify the password hash">
+    Passes the stored `PasswordHash` and the raw input to
+    `IPasswordHasher.Verify`. A mismatch also returns
+    `AuthResult.Fail("Credenciales incorrectas.")`.
+  </Step>
+  <Step title="Sign in via ISessionManager">
+    On success, calls `ISessionManager.SignInAsync(user)`, which writes an
+    authentication cookie carrying the user's ID and email as claims.
+  </Step>
+  <Step title="Return success">
+    Returns `AuthResult.Ok()` — a record with `Success = true` and `Error = null`.
+  </Step>
+</Steps>
+
+### Source
+
+```csharp Application/UseCases/AuthenticateUser.cs
+public class AuthenticateUser
+{
+    public async Task<AuthResult> ExecuteAsync(string email, string password)
+    {
+        User? user = await _userRepository.GetByEmailAsync(email);
+
+        if (user == null)
+            return AuthResult.Fail("Credenciales incorrectas.");
+
+        if (!_passwordHasher.Verify(user.PasswordHash, password))
+            return AuthResult.Fail("Credenciales incorrectas.");
+
+        await _sessionManager.SignInAsync(user); // crea cookie
+
+        return AuthResult.Ok();
+    }
+}
+```
+
+### Error conditions
+
+<Warning>
+  Both "user not found" and "wrong password" return the same error message —
+  `"Credenciales incorrectas."` — to prevent attackers from discovering which
+  email addresses are registered.
+</Warning>
+
+| Condition | `Success` | `Error` |
+|---|---|---|
+| User not found | `false` | `"Credenciales incorrectas."` |
+| Password mismatch | `false` | `"Credenciales incorrectas."` |
+| Valid credentials | `true` | `null` |
+
+---
+
+## RegisterUser
+
+Creates a new user account by hashing the provided password, persisting the entity, and returning the new user's ID.
+
+**Method signature**
+
+```csharp
+public async Task<RegisterResult> ExecuteAsync(string email, string rawPassword)
+```
+
+### Parameters
+
+<ParamField path="email" type="string" required>
+  The email address for the new account. Must be unique across all users — a
+  duplicate triggers an early-return failure before any write occurs.
+</ParamField>
+
+<ParamField path="rawPassword" type="string" required>
+  The plain-text password chosen by the new user. It is hashed by
+  `User.Create(...)` via `IPasswordHasher.Hash` before being stored; the raw
+  value is never persisted.
+</ParamField>
+
+### Return value
+
+<ResponseField name="RegisterResult" type="record">
+  <Expandable title="fields">
+    <ResponseField name="Success" type="bool">
+      `true` when the user was created successfully; `false` if the email is
+      already registered.
+    </ResponseField>
+    <ResponseField name="NewId" type="int | null">
+      The database-assigned ID of the newly created user. Only present when
+      `Success` is `true`.
+    </ResponseField>
+    <ResponseField name="Error" type="string | null">
+      `null` on success. `"Ese email ya está registrado."` when a user with
+      the given email already exists.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### How it works
+
+<Steps>
+  <Step title="Check for a duplicate email">
+    Calls `IUserRepository.GetByEmailAsync(email)`. If a record is returned,
+    the use case exits early with `RegisterResult.Fail("Ese email ya está registrado.")`.
+    No write takes place.
+  </Step>
+  <Step title="Create the User entity">
+    Calls the domain factory `User.Create(email, rawPassword, _passwordHasher)`.
+    The factory hashes the password internally via `IPasswordHasher.Hash` and
+    sets all required fields on the new `User` instance.
+  </Step>
+  <Step title="Persist the new user">
+    Calls `IUserRepository.AddAsync(user)`, which inserts the record and
+    flushes the EF Core change tracker.
+  </Step>
+  <Step title="Return the new ID">
+    Returns `RegisterResult.Ok(user.Id)`, carrying the auto-generated primary
+    key so the caller can reference the new account immediately.
+  </Step>
+</Steps>
+
+### Source
+
+```csharp Application/UseCases/RegisterUser.cs
+public class RegisterUser
+{
+    public async Task<RegisterResult> ExecuteAsync(string email, string rawPassword)
+    {
+        var existing = await _userRepository.GetByEmailAsync(email);
+        if (existing is not null)
+        {
+            return RegisterResult.Fail("Ese email ya está registrado.");
+        }
+
+        var user = User.Create(email, rawPassword, _passwordHasher);
+
+        await _userRepository.AddAsync(user);
+
+        return RegisterResult.Ok(user.Id);
+    }
+}
+```
+
+### Error conditions
+
+| Condition | `Success` | `NewId` | `Error` |
+|---|---|---|---|
+| Email already registered | `false` | `null` | `"Ese email ya está registrado."` |
+| Registration successful | `true` | `<new id>` | `null` |
+
+<Note>
+  `RegisterUser` does **not** sign in the new user automatically. After a
+  successful registration, the caller is responsible for redirecting the user
+  to the login page or explicitly invoking `AuthenticateUser`.
+</Note>
+
+---
+
+## LogoutUser
+
+Terminates the current user session by revoking the authentication cookie.
+
+**Method signature**
+
+```csharp
+public async Task ExecuteAsync()
+```
+
+### Parameters
+
+This method takes no parameters. It operates exclusively through the
+`ISessionManager` abstraction, which reads the current HTTP context internally.
+
+### Return value
+
+`Task` — the method completes when the session has been revoked. It does not
+return a result object because logout is considered an unconditional operation:
+if there is no active session, `SignOutAsync` is a no-op.
+
+### How it works
+
+<Steps>
+  <Step title="Delegate to ISessionManager">
+    Calls `ISessionManager.SignOutAsync()`, which invokes ASP.NET Core's
+    `HttpContext.SignOutAsync` to remove the authentication cookie from the
+    response.
+  </Step>
+</Steps>
+
+### Source
+
+```csharp Application/UseCases/LogoutUser.cs
+public class LogoutUser
+{
+    public async Task ExecuteAsync()
+    {
+        await _sessionManager.SignOutAsync();
+    }
+}
+```
+
+<Info>
+  Because `LogoutUser` has a single dependency (`ISessionManager`) and a
+  single line of logic, it is deliberately thin. All cookie-handling details
+  live in the infrastructure adapter `CookieSessionManager`, keeping this use
+  case easy to unit-test with a mock.
+</Info>
+
+---
+
+## DTOs
+
+Data transfer objects used as inputs and outputs for the use cases above. All three are C# `record` types — immutable by default, with built-in value equality.
+
+### AuthResult
+
+Returned by `AuthenticateUser.ExecuteAsync`.
+
+```csharp Application/DTOs/AuthResult.cs
+public record AuthResult(bool Success, string? Error = null)
+{
+    public static AuthResult Ok() => new(true);
+    public static AuthResult Fail(string error) => new(false, error);
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="AuthResult.Ok()" icon="circle-check">
+    Factory for a successful authentication. Produces `{ Success: true, Error: null }`.
+  </Card>
+  <Card title="AuthResult.Fail(string error)" icon="circle-xmark">
+    Factory for a failed authentication. Produces `{ Success: false, Error: "<message>" }`.
+  </Card>
+</CardGroup>
+
+| Field | Type | Description |
+|---|---|---|
+| `Success` | `bool` | `true` when authentication succeeded. |
+| `Error` | `string?` | Human-readable error message, or `null` on success. |
+
+---
+
+### RegisterResult
+
+Returned by `RegisterUser.ExecuteAsync`.
+
+```csharp Application/DTOs/RegisterResult.cs
+public record RegisterResult(bool Success, int? NewId = null, string? Error = null)
+{
+    public static RegisterResult Ok(int newId) => new(true, newId);
+    public static RegisterResult Fail(string error) => new(false, Error: error);
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="RegisterResult.Ok(int newId)" icon="circle-check">
+    Factory for a successful registration. Carries the new user's database ID.
+    Produces `{ Success: true, NewId: <id>, Error: null }`.
+  </Card>
+  <Card title="RegisterResult.Fail(string error)" icon="circle-xmark">
+    Factory for a failed registration. Produces `{ Success: false, NewId: null, Error: "<message>" }`.
+  </Card>
+</CardGroup>
+
+| Field | Type | Description |
+|---|---|---|
+| `Success` | `bool` | `true` when the account was created. |
+| `NewId` | `int?` | The new user's primary key, or `null` on failure. |
+| `Error` | `string?` | Human-readable error message, or `null` on success. |
+
+---
+
+### LoginRequest
+
+A strongly-typed container for the values submitted on a login form. Not passed
+directly to `AuthenticateUser.ExecuteAsync`, but used by the Blazor component
+layer to bind form fields and carry the `RememberMe` preference.
+
+```csharp Application/DTOs/LoginRequest.cs
+public record LoginRequest(string Email, string Password, bool RememberMe = false);
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `Email` | `string` | — | The email address entered by the user. |
+| `Password` | `string` | — | The plain-text password entered by the user. |
+| `RememberMe` | `bool` | `false` | When `true`, signals the session layer to issue a persistent cookie. |

@@ -1,47 +1,93 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get started with Porfolio & Blog CMS"
+sidebarTitle: "Quickstart"
+description: "Clone the repository, apply EF Core migrations, and run the Blazor Server application locally in under five minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide walks you through everything needed to get Porfolio & Blog CMS running on your local machine. By the end you will have a fully functional Blazor Server application backed by a SQLite database, with an admin account ready to use — all in under five minutes.
 
 ## Prerequisites
 
-Before you begin, you must have:
+Before you begin, make sure the following are installed:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+- **[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)** — the project targets `net10.0`. Verify with `dotnet --version`.
+- **dotnet-ef tool (version 10.0.9)** — required to apply EF Core database migrations. Install it globally with:
 
-## Get started
+```bash
+dotnet tool install --global dotnet-ef --version 10.0.9
+```
+
+If you prefer to use the local tool manifest already included in the repository (`.config/dotnet-tools.json`), run `dotnet tool restore` after cloning instead.
+
+## Running the App
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the repository">
+    Download the source code from GitHub and navigate into the project directory.
 
     ```bash
-    npm install your-package
+    git clone https://github.com/Andrespeerez/porfolio-blog.git
+    cd porfolio-blog
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Restore dependencies">
+    Restore all NuGet packages declared in `porfolio-blog.csproj`. This includes EF Core 10, the SQLite provider, EF Core Tools, and ASP.NET Core Identity.
 
     ```bash
-    your-cli init
+    dotnet restore
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Apply database migrations">
+    Run EF Core migrations to create the `blog.db` SQLite file in the project root. The `Default` connection string in `appsettings.json` points to this file (`Data Source=blog.db`).
 
     ```bash
-    your-cli start
+    dotnet ef database update
     ```
+
+    After this step a `blog.db` file will appear in the `porfolio-blog/` directory.
+  </Step>
+
+  <Step title="Run the application">
+    Start the Blazor Server application using the .NET CLI. The default launch profile uses HTTP.
+
+    ```bash
+    dotnet run
+    ```
+
+    To use HTTPS instead, specify the profile explicitly:
+
+    ```bash
+    dotnet run --launch-profile https
+    ```
+  </Step>
+
+  <Step title="Open the app in your browser">
+    Navigate to **http://localhost:5058** (HTTP) or **https://localhost:7140** (HTTPS) in your browser. You should see the home page of the portfolio site.
+
+    In **Development** mode, `AdminUserSeeder` automatically creates an admin account on first run using the credentials defined in `appsettings.Development.json`:
+
+    | Field | Value |
+    |---|---|
+    | Email | `admin@andresblog.com` |
+    | Password | `Admin123!` |
+
+    Use these credentials at **/login** to access the protected **/admin** page.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+<Warning>
+  The seed credentials in `appsettings.Development.json` (`admin@andresblog.com` / `Admin123!`) exist for local development convenience only. Before deploying to any public or production environment, remove the `Seed` section from your configuration and provision an admin account through a secure out-of-band process. Leaving default credentials in a deployed application is a serious security risk.
+</Warning>
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="layer-group" href="/architecture">
+    Understand how the five Clean Architecture layers interact and where to add new features.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/authentication">
+    Learn how cookie authentication and the admin seeder work together to protect the admin area.
+  </Card>
+</CardGroup>
