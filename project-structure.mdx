@@ -1,14 +1,14 @@
 ---
-title: "Codebase layout and layer responsibilities"
+title: "Project Structure: Clean Architecture Folder Layout"
 sidebarTitle: "Project Structure"
-description: "Explore the five-layer Clean Architecture folder layout of Porfolio & Blog CMS and learn what each directory contains."
+description: "A guided tour of the five Clean Architecture layers in Porfolio & Blog CMS, showing every folder, its responsibility, and the files it contains."
 ---
 
 Porfolio & Blog CMS is organised around Clean Architecture principles. Every file lives in one of five named layers — **Domain**, **Application**, **Infrastructure**, **Api**, or **UI** — each of which maps directly to a top-level folder in the repository. This layout makes it straightforward to locate any piece of logic, understand what it depends on, and add new capabilities without violating the dependency rule.
 
 ## Directory Tree
 
-```
+```text
 porfolio-blog/
 ├── Domain/
 │   └── Entities/
@@ -55,15 +55,23 @@ porfolio-blog/
 │   │   └── ReconnectModal.razor
 │   └── Pages/
 │       ├── Home.razor
+│       ├── Counter.razor
+│       ├── Weather.razor
+│       ├── Error.razor
+│       ├── NotFound.razor
 │       ├── Login/
 │       │   └── Login.razor
 │       └── Admin/
 │           └── Admin.razor
 ├── wwwroot/
-│   └── app.css
+│   ├── app.css
+│   ├── favicon.png
+│   └── lib/
+│       └── bootstrap/
 ├── Program.cs
 ├── appsettings.json
 ├── appsettings.Development.json
+├── dotnet-tools.json
 └── porfolio-blog.csproj
 ```
 
@@ -72,7 +80,7 @@ porfolio-blog/
 | Layer | Responsibility | Key Files |
 |---|---|---|
 | **Domain** | Business entities and rules with zero framework dependencies. Defines the core data model that all other layers build upon. | `User.cs` |
-| **Application** | Use cases that orchestrate domain logic, port interfaces that abstract infrastructure concerns, and DTOs that cross layer boundaries. | `AuthenticateUser.cs`, `IUserRepository.cs`, `ISessionManager.cs` |
+| **Application** | Use cases (`AuthenticateUser`, `RegisterUser`, `LogoutUser`) that orchestrate domain logic, port interfaces that abstract infrastructure concerns, and DTOs that cross layer boundaries. | `AuthenticateUser.cs`, `RegisterUser.cs`, `IUserRepository.cs`, `ISessionManager.cs` |
 | **Infrastructure** | Concrete adapters that fulfil the Application interfaces — EF Core `AppDbContext`, cookie-based session management, Identity password hashing, and the development admin seeder. | `AppDbContext.cs`, `CookieSessionManager.cs`, `UserRepository.cs` |
 | **Api** | Minimal API endpoint registrations mounted in `Program.cs` via `MapLogin()` and `MapLogout()`. Each file defines a single endpoint that delegates immediately to an Application use case. | `Login.cs`, `Logout.cs` |
 | **UI** | Blazor Server components and pages. `App.razor` is the root component; `MainLayout.razor` and `NavMenu.razor` define the shell; individual pages live under `Pages/`. | `App.razor`, `MainLayout.razor`, `Admin.razor` |
@@ -84,6 +92,7 @@ porfolio-blog/
 | `Program.cs` | Application entry point — registers services (DB, auth, Blazor, use cases, seeder), builds the middleware pipeline, and maps routes. |
 | `appsettings.json` | Production configuration: SQLite connection string (`Data Source=blog.db`) and log levels. |
 | `appsettings.Development.json` | Development overrides: admin seed credentials (`AdminEmail`, `AdminPassword`). **Never deploy this file with default values.** |
+| `dotnet-tools.json` | Local tool manifest pinning `dotnet-ef` at version `10.0.9`. Run `dotnet tool restore` to install from this manifest instead of installing globally. |
 | `porfolio-blog.csproj` | Project file targeting `net10.0`, referencing EF Core 10, the SQLite provider, EF Core Tools, and `Microsoft.Extensions.Identity.Core`. |
 
 <Tip>

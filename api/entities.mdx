@@ -1,7 +1,7 @@
 ---
-title: "User entity: domain model and factory method"
+title: "User entity — domain model, properties, and factory method"
 sidebarTitle: "User Entity"
-description: "Reference for the User domain entity in Porfolio & Blog CMS, including its properties, the User.Create factory method, and how it interacts with IPasswordHasher."
+description: "Reference for the User domain entity: Id, Email, PasswordHash, the User.Create static factory, and EF Core unique-index configuration."
 ---
 
 `User` is the only domain entity in the application. It lives in the `Domain` layer with no framework dependencies. Password hashing is delegated to `IPasswordHasher` via the factory method, keeping the entity clean.

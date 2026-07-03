@@ -1,7 +1,7 @@
 ---
-title: "Porfolio & Blog CMS: ASP.NET Core + Blazor Server"
+title: "Porfolio & Blog CMS — ASP.NET Core 10 & Blazor Server"
 sidebarTitle: "Home"
-description: "A personal portfolio and blog CMS built with ASP.NET Core 10 and Blazor Server, featuring clean architecture, cookie authentication, and a SQLite-backed admin panel."
+description: "Self-hosted portfolio and blog CMS: ASP.NET Core 10, Blazor Server, Clean Architecture, cookie auth, EF Core 10, SQLite, and a protected admin panel."
 ---
 
 Porfolio & Blog CMS is a self-hosted personal website and content management system built with **ASP.NET Core 10** and **Blazor Server**. It implements a full Clean Architecture stack—Domain, Application, Infrastructure, API, and UI layers—giving you a maintainable, testable foundation you can extend with blog posts, portfolio projects, and custom pages.
@@ -43,28 +43,33 @@ The project is organized into five distinct layers that keep business logic deco
 ## Get up and running
 
 <Steps>
-  <Step title="Clone and restore">
-    Clone the repository and restore .NET dependencies.
+  <Step title="Clone the repository">
+    Download the source code from GitHub and navigate into the project directory.
     ```bash
     git clone https://github.com/Andrespeerez/porfolio-blog.git
     cd porfolio-blog
+    ```
+  </Step>
+  <Step title="Restore dependencies">
+    Restore all NuGet packages declared in `porfolio-blog.csproj`.
+    ```bash
     dotnet restore
     ```
   </Step>
   <Step title="Apply database migrations">
-    Run EF Core migrations to create the SQLite database.
+    Run EF Core migrations to create the `blog.db` SQLite database file.
     ```bash
     dotnet ef database update
     ```
   </Step>
   <Step title="Run the application">
-    Start the Blazor Server app. The dev admin user is seeded automatically.
+    Start the Blazor Server app. The dev admin user is seeded automatically on first run.
     ```bash
     dotnet run
     ```
   </Step>
-  <Step title="Log in to the admin panel">
-    Open your browser to `http://localhost:5058` and navigate to `/login`. Use the seeded credentials from `appsettings.Development.json` to sign in and access `/admin`.
+  <Step title="Open the app in your browser">
+    Navigate to **http://localhost:5058** and go to `/login`. Use the seeded credentials from `appsettings.Development.json` (`admin@andresblog.com` / `Admin123!`) to sign in and access the protected `/admin` panel.
   </Step>
 </Steps>
 

@@ -1,7 +1,7 @@
 ---
 title: "Application port interfaces: repositories and services"
 sidebarTitle: "Interfaces"
-description: "Reference for IUserRepository, IPasswordHasher, and ISessionManager — the port interfaces that decouple Application use cases from infrastructure implementations."
+description: "Reference for IUserRepository, IPasswordHasher, and ISessionManager — the three port interfaces that decouple Application use cases from infrastructure."
 ---
 
 The Application layer defines three port interfaces that act as contracts between the business logic and the infrastructure adapters. By depending only on these abstractions, the use cases remain fully independent of EF Core, ASP.NET Core Identity, and cookie middleware — any of those can be swapped without touching a single line of business logic.

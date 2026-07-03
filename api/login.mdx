@@ -1,6 +1,6 @@
 ---
-title: "POST /api/auth/login — authenticate a user"
-sidebarTitle: "POST /api/auth/login"
+title: "POST /api/auth/login — Authenticate a User by Email"
+sidebarTitle: "Login"
 description: "POST /api/auth/login authenticates a user with email and password. On success, sets an authentication cookie. Returns 200 OK or 400 Bad Request."
 ---
 
@@ -38,14 +38,15 @@ This endpoint accepts a JSON body containing `email` and `password`, delegates c
 ```json Request body
 {
   "email": "admin@andresblog.com",
-  "password": "Admin123!"
+  "password": "Admin123!",
+  "rememberMe": false
 }
 ```
 
 ```bash cURL
 curl -c cookies.txt -X POST https://localhost:7140/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@andresblog.com","password":"Admin123!"}'
+  -d '{"email":"admin@andresblog.com","password":"Admin123!","rememberMe":false}'
 ```
 
 ## Responses

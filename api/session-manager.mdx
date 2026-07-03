@@ -1,7 +1,7 @@
 ---
-title: "CookieSessionManager and IdentityPasswordHasher implementations"
+title: "CookieSessionManager and IdentityPasswordHasher reference"
 sidebarTitle: "Session Manager"
-description: "Reference for CookieSessionManager (ISessionManager) and IdentityPasswordHasher (IPasswordHasher) — the infrastructure implementations for auth session and password hashing."
+description: "Reference for the auth infrastructure layer: CookieSessionManager handles cookie sessions; IdentityPasswordHasher wraps ASP.NET Core Identity."
 ---
 
 Two infrastructure classes implement the auth-related port interfaces: `CookieSessionManager` handles session lifecycle (sign-in and sign-out) via ASP.NET Core cookie authentication, and `IdentityPasswordHasher` wraps `Microsoft.AspNetCore.Identity.IPasswordHasher<User>` to provide secure PBKDF2-backed password hashing. Both classes live in the `Infrastructure.Auth` namespace and have no direct dependencies on the `Domain` or `Application` layers beyond the interfaces they satisfy.

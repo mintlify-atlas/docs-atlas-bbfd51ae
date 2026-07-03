@@ -31,23 +31,24 @@ Porfolio & Blog CMS authenticates users with **ASP.NET Core cookie authenticatio
 `IdentityPasswordHasher` is a thin adapter that satisfies the Application-layer `IPasswordHasher` interface by wrapping the `IPasswordHasher<User>` service registered from `Microsoft.AspNetCore.Identity`. This design keeps the `Application` project free from any Identity package reference — only `Infrastructure` knows about it.
 
 ```csharp Infrastructure/Auth/IdentityPasswordHasher.cs
-public string Hash(string rawPassword)
-{
-    return _inner.HashPassword(new User(), rawPassword);
-}
-
 public bool Verify(string hashedPassword, string password)
 {
     var result = _inner.VerifyHashedPassword(new User(), hashedPassword, password);
     return result is PasswordVerificationResult.Success;
 }
+
+public string Hash(string rawPassword)
+{
+    return _inner.HashPassword(new User(), rawPassword);
+}
 ```
 
-`IPasswordHasher<User>.HashPassword` uses PBKDF2 with a random salt and a high iteration count by default — the same algorithm used by ASP.NET Core Identity when managing user stores. `Verify` returns `true` only when `VerifyHashedPassword` yields `PasswordVerificationResult.Success`; the `SuccessRehashNeeded` case is intentionally treated as a failure to keep the implementation simple and explicit.
+`IPasswordHasher<User>.HashPassword` uses PBKDF2 with a random salt and a high iteration count by default — the same algorithm used by ASP.NET Core Identity when managing user stores. `Verify` returns `true` only when `VerifyHashedPassword` yields `PasswordVerificationResult.Success`.
 
 The concrete hasher is registered in `Program.cs` before the adapter:
 
 ```csharp Program.cs
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 // ...
 builder.Services.AddScoped<IPasswordHasher, IdentityPasswordHasher>();

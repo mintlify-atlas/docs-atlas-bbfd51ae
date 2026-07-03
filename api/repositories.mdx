@@ -56,6 +56,10 @@ public class UserRepository : IUserRepository
 ```csharp Infrastructure/Persistence/Context/AppDbContext.cs
 public class AppDbContext : DbContext
 {
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+    {
+    }
+
     public DbSet<User> Users => Set<User>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

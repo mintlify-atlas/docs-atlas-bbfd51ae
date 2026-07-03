@@ -127,5 +127,5 @@ Both services are registered in `Program.cs`:
 </Note>
 
 <Tip>
-  To add a **Remember Me** feature, add a `RememberMe` boolean property to `LoginModel` and bind it to a checkbox in the form. Then pass it through to `AuthenticateUser.ExecuteAsync`. The `LoginRequest` DTO already includes a `RememberMe` parameter, so the use case and session manager are already wired to honour it — the cookie persistence duration is controlled inside `CookieSessionManager.SignInAsync()`.
+  To add a **Remember Me** feature, add a `RememberMe` boolean property to `LoginModel` and bind it to a checkbox in the form. The `LoginRequest` DTO already defines a `RememberMe` field (`bool RememberMe = false`), but the wiring is not yet complete: `AuthenticateUser.ExecuteAsync` currently accepts only `(string email, string password)` and `ISessionManager.SignInAsync` accepts only a `User`. To complete the feature you would need to: (1) add a `rememberMe` parameter to `AuthenticateUser.ExecuteAsync`, (2) add it to `ISessionManager.SignInAsync`, and (3) update `CookieSessionManager.SignInAsync` to set `IsPersistent = rememberMe` on the `AuthenticationProperties` passed to `HttpContext.SignInAsync`.
 </Tip>

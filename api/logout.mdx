@@ -1,7 +1,7 @@
 ---
 title: "POST /api/auth/logout — sign out the current user"
-sidebarTitle: "POST /api/auth/logout"
-description: "POST /api/auth/logout signs out the currently authenticated user by clearing the authentication cookie and redirects to /login."
+sidebarTitle: "Logout"
+description: "POST /api/auth/logout signs out the currently authenticated user, clears the authentication cookie via SignOutAsync, and redirects to /login."
 ---
 
 This endpoint requires the caller to be authenticated (`.RequireAuthorization()` is applied at registration time). It delegates to `LogoutUser.ExecuteAsync()`, which calls `ISessionManager.SignOutAsync()` — implemented by `CookieSessionManager` — to clear the ASP.NET Core authentication cookie. Once the cookie is invalidated, the server issues a `302 Found` redirect to `/login`, returning the browser to the public login page.

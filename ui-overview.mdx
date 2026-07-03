@@ -1,5 +1,5 @@
 ---
-title: "Blazor Server UI structure and layout components"
+title: "Blazor Server UI: app shell, layout, and navigation"
 sidebarTitle: "UI Overview"
 description: "Understand how Porfolio & Blog CMS organises its Blazor Server UI, from the root App.razor shell to MainLayout and the NavMenu sidebar."
 ---
@@ -132,16 +132,23 @@ The reconnect logic itself (timers, retry counting, DOM class toggling) lives in
 
 ## Render modes
 
-Blazor 8+ (and ASP.NET Core 10) supports multiple render modes per component. The Porfolio & Blog CMS uses two modes:
+Blazor 8+ (and ASP.NET Core 10) supports multiple render modes per component. The Porfolio & Blog CMS uses three modes:
 
-**Static SSR (default)** — Pages render on the server and return plain HTML. There is no persistent SignalR connection and no client-side interactivity. This is the default for all pages that do not declare a `@rendermode` directive, including `Home.razor`, `Login.razor`, `Counter.razor`, and `Weather.razor`.
+**Static SSR (default)** — Pages render on the server and return plain HTML. There is no persistent SignalR connection and no client-side interactivity. This is the default for all pages that do not declare a `@rendermode` directive, including `Home.razor` and `Login.razor`.
 
-**`@rendermode InteractiveServer`** — The component renders server-side *and* establishes a live SignalR circuit so UI events (button clicks, form changes) are handled on the server in real time. `Admin.razor` uses this mode because it needs to reactively display authentication state via `<AuthorizeView>` and handle the `ClaimsPrincipal` from the cascading `AuthenticationState`.
+**`@attribute [StreamRendering]`** — The component renders server-side but streams incremental HTML updates to the browser while async data is still loading. `Weather.razor` uses this mode to display a loading placeholder while the weather forecasts are fetched, then replace it with the populated table without a full-page reload.
+
+**`@rendermode InteractiveServer`** — The component renders server-side *and* establishes a live SignalR circuit so UI events (button clicks, form changes) are handled on the server in real time. Both `Admin.razor` and `Counter.razor` use this mode. `Admin.razor` needs it to reactively display authentication state via `<AuthorizeView>` and handle the `ClaimsPrincipal` from the cascading `AuthenticationState`; `Counter.razor` needs it to update the counter value on every button click without a full page reload.
 
 ```razor Admin.razor (render mode declaration)
 @page "/admin"
 @rendermode InteractiveServer
 @attribute [Authorize]
+```
+
+```razor Counter.razor (render mode declaration)
+@page "/counter"
+@rendermode InteractiveServer
 ```
 
 Use `@rendermode InteractiveServer` when a page or component requires:

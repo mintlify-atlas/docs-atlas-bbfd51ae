@@ -1,7 +1,7 @@
 ---
-title: "Porfolio & Blog CMS: Personal site on ASP.NET Core"
+title: "Porfolio & Blog CMS: Blazor Server on ASP.NET Core"
 sidebarTitle: "Introduction"
-description: "Porfolio & Blog CMS is a self-hosted personal website built with ASP.NET Core 10 and Blazor Server, using Clean Architecture and cookie-based authentication."
+description: "Self-hosted portfolio and blog built with ASP.NET Core 10 and Blazor Server, using Clean Architecture, SQLite, and cookie-based authentication."
 ---
 
 Porfolio & Blog CMS is a self-hosted personal website built by Andrés Pérez Guardiola — Full Stack Developer. It combines a developer portfolio and a content management system for blog posts into a single, cohesive ASP.NET Core 10 application. The UI is rendered entirely with Blazor Server, meaning all component logic runs on the server and is streamed to the browser over a SignalR connection — no separate JavaScript framework required. The project is designed for developers who want full ownership of their personal site without relying on a third-party CMS platform, and whose codebase is structured to be extended with new portfolio entries and blog content over time.
@@ -40,7 +40,7 @@ The project follows Clean Architecture, splitting concerns across five layers. E
 | Layer | Responsibility |
 |---|---|
 | **Domain** | Core business entities and rules. Contains `User.cs` with no framework dependencies whatsoever. |
-| **Application** | Use cases, port interfaces (repositories and services), and DTOs. This layer orchestrates domain logic without touching infrastructure. |
+| **Application** | Use cases (`AuthenticateUser`, `RegisterUser`, `LogoutUser`), port interfaces (repositories and services), and DTOs. This layer orchestrates domain logic without touching infrastructure. |
 | **Infrastructure** | Concrete adapters that fulfil the Application interfaces — EF Core persistence, cookie session management, and Identity password hashing. |
 | **Api** | Minimal API endpoint registrations (`POST /api/auth/login`, `POST /api/auth/logout`) that delegate to Application use cases. |
 | **UI** | Blazor Server components and pages. Depends on Application use cases and is completely decoupled from Infrastructure concerns. |

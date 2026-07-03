@@ -1,7 +1,7 @@
 ---
-title: "Seed the admin user for local development"
+title: "Bootstrap the admin user in the Development environment"
 sidebarTitle: "Seeding"
-description: "AdminUserSeeder automatically creates the first admin user on app startup in the Development environment using credentials from appsettings.Development.json."
+description: "AdminUserSeeder runs at startup in Development, checks for an existing admin, and creates one from Seed:AdminEmail and Seed:AdminPassword if absent."
 ---
 
 On every startup in the **Development** environment, `AdminUserSeeder.SeedAsync()` checks whether the configured admin email already exists in the database and creates the user if it doesn't. This means you never need to manually run SQL scripts, open a database browser, or call a registration endpoint just to get a working admin account — cloning the repository and running `dotnet run` is enough to have a fully authenticated local environment within seconds.

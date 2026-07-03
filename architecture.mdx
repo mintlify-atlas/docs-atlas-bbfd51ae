@@ -1,7 +1,7 @@
 ---
-title: "Clean Architecture layers in Porfolio & Blog CMS"
+title: "Clean Architecture layers in the Porfolio & Blog CMS"
 sidebarTitle: "Architecture"
-description: "Learn how Porfolio & Blog CMS implements Clean Architecture across five layers: Domain, Application, Infrastructure, Api, and UI."
+description: "Learn how Porfolio & Blog CMS implements Clean Architecture across five layers: Domain, Application, Infrastructure, Api, and UI with code examples."
 ---
 
 Porfolio & Blog CMS is structured around **Clean Architecture** — a layering strategy that keeps business logic completely independent of frameworks, databases, and delivery mechanisms. The Domain and Application layers contain every rule and use case that matters to the product; they have zero knowledge of ASP.NET Core, Entity Framework, or Blazor. Infrastructure, Api, and UI are outer rings that implement interfaces defined in the inner layers, which means the entire technology stack can be swapped without touching a single business rule.
@@ -87,6 +87,19 @@ The UI layer is a Blazor Server application. Components and pages are purely pre
 `Program.cs` wires every port to its adapter and registers each use case as a scoped service, following the standard ASP.NET Core DI pattern:
 
 ```csharp Program.cs
+// DB
+builder.Services.AddDbContext<AppDbContext>(opts =>
+    opts.UseSqlite(builder.Configuration.GetConnectionString("Default")));
+
+// Auth (cookie scheme + identity hasher)
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(o =>
+    {
+        o.LoginPath = "/login";
+    });
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+
 // Ports -> Adapters
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IPasswordHasher, IdentityPasswordHasher>();
@@ -96,6 +109,10 @@ builder.Services.AddScoped<ISessionManager, CookieSessionManager>();
 builder.Services.AddScoped<AuthenticateUser>();
 builder.Services.AddScoped<RegisterUser>();
 builder.Services.AddScoped<LogoutUser>();
+
+// Blazor
+builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+builder.Services.AddCascadingAuthenticationState();
 ```
 
 Because all three use cases are scoped, a fresh instance is created per HTTP request, keeping them stateless and safe for concurrent Blazor Server circuits.

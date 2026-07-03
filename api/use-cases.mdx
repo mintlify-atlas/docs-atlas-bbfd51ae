@@ -1,7 +1,7 @@
 ---
-title: "Application use cases: AuthenticateUser, RegisterUser, LogoutUser"
+title: "Use Cases: AuthenticateUser, RegisterUser, LogoutUser"
 sidebarTitle: "Use Cases"
-description: "Reference for the three application use cases in Porfolio & Blog CMS: AuthenticateUser, RegisterUser, and LogoutUser — each encapsulating a single business operation."
+description: "Reference for the three use cases in Porfolio & Blog CMS — AuthenticateUser, RegisterUser, and LogoutUser, each encapsulating one business operation."
 ---
 
 The Application layer exposes three use cases that represent the core business operations of the CMS. Each use case is a plain C# class registered in the DI container and injected wherever it is needed. They depend exclusively on port interfaces — never on concrete infrastructure — keeping the business logic fully decoupled from EF Core, Identity, or ASP.NET Core internals.
@@ -204,6 +204,15 @@ public class RegisterUser
   successful registration, the caller is responsible for redirecting the user
   to the login page or explicitly invoking `AuthenticateUser`.
 </Note>
+
+<Warning>
+  **No HTTP endpoint is currently mapped for `RegisterUser`.** The
+  `Api/Auth/Register.cs` file exists but is empty, and `Program.cs` does not
+  call any `MapRegister()` extension. `RegisterUser` is available as an
+  Application-layer use case and is registered in the DI container
+  (`AddScoped<RegisterUser>()`), but it cannot be invoked through a public API
+  request at this time. Wire up an endpoint before exposing this functionality.
+</Warning>
 
 ---
 
